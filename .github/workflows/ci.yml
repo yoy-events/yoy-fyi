@@ -1,0 +1,69 @@
+# Checks run on GitHub-hosted runners. Deploys run on the self-hosted runner inside the yoy-fyi VM (ADR-0002):
+# a green PR from this repository deploys to test.yoy.fyi, a push to main deploys to yoy.fyi.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["55433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run geoip:fetch
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e
+        env:
+          CI: "true"
+
+  deploy:
+    needs: check
+    # Fork PRs never reach the self-hosted runner.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, yoy-fyi]
+    timeout-minutes: 15
+    environment: ${{ github.event_name == 'push' && 'production' || 'test' }}
+    concurrency:
+      group: deploy-${{ github.event_name == 'push' && 'prod' || 'test' }}
+      cancel-in-progress: false
+    env:
+      STAGE: ${{ github.event_name == 'push' && 'prod' || 'test' }}
+      PROJECT: ${{ github.event_name == 'push' && 'yoy-fyi' || 'yoy-fyi-test' }}
+      ORIGIN: ${{ github.event_name == 'push' && 'https://yoy.fyi' || 'https://test.yoy.fyi' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the stack
+        run: docker compose -p "$PROJECT" -f compose.prod.yml --env-file "deploy/$STAGE.env" up -d --build --wait --wait-timeout 180
+      - name: Smoke through the public URL
+        run: |
+          for _ in $(seq 1 30); do
+            curl -fsS "$ORIGIN/health" && break
+            sleep 2
+          done
+          curl -fsS "$ORIGIN/health"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$ORIGIN/no-such-code-$GITHUB_RUN_ID")" = 404
+      - name: Remove dangling images
+        if: always()
+        run: docker image prune -f
