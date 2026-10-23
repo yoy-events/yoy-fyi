@@ -31,8 +31,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run typecheck
-      - run: bun run test
       - run: bun run geoip:fetch
+      - run: bun run test
       - run: bunx playwright install --with-deps chromium
       - run: bun run test:e2e
         env:
