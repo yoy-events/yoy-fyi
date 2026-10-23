@@ -2,6 +2,7 @@ import type { SQL } from "bun";
 import { Hono } from "hono";
 import { SCOPES, type Scope, issueKey, toApiKey } from "../keys";
 import { Layout } from "./layout";
+import { LinkForm, LinkList } from "./links";
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -125,6 +126,7 @@ export function serviceRoutes(sql: SQL) {
   app.get("/services/:slug", async (c) => {
     const [service] = await sql`select id, slug, name from services where slug = ${c.req.param("slug")}`;
     if (!service) return c.notFound();
+    const status = ["active", "expired", "disabled"].includes(c.req.query("status") ?? "") ? c.req.query("status")! : "all";
     const keys = await sql`
       select id, name, prefix, scopes, created_at, last_used_at, revoked_at from api_keys
       where service_id = ${service.id} order by revoked_at nulls first, id desc`;
@@ -137,6 +139,8 @@ export function serviceRoutes(sql: SQL) {
     return c.html(
       <Layout title={service.slug} signedIn>
         <h1>{service.slug}</h1>
+        {await LinkList({ sql, serviceId: service.id, status })}
+        <LinkForm slug={service.slug} />
         <section>
           <h2>API keys</h2>
           <ul class="list">

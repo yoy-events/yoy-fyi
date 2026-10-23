@@ -98,3 +98,83 @@ describe("services and keys", () => {
     expect(page).toMatch(/1 dead/);
   });
 });
+
+describe("links", () => {
+  let serviceId: string;
+  beforeEach(async () => {
+    await issueKey(sql, { serviceSlug: "yoy", name: "k", scopes: ["links:read"] });
+    [{ id: serviceId }] = await sql`select id from services where slug = 'yoy'`;
+  });
+
+  test("creates a link from the form with every rule the API applies", async () => {
+    const res = await adminPost(
+      app,
+      "/admin/services/yoy/links",
+      {
+        target_url: "https://example.com/landing",
+        code: "fall",
+        title: "Fall launch",
+        tags: "fall, ig",
+        utm_source: "ig",
+        utm_medium: "",
+        utm_campaign: "fall",
+        expires_at: "2027-01-01T00:00",
+        pass_click_id: "on",
+      },
+      cookie,
+    );
+
+    expect(res.status).toBe(303);
+    const [link] = await sql`select * from links where code = 'fall'`;
+    expect(res.headers.get("location")).toBe(`/admin/links/${link.id}`);
+    expect(link).toMatchObject({
+      service_id: serviceId,
+      target_url: "https://example.com/landing",
+      title: "Fall launch",
+      tags: ["fall", "ig"],
+      utm_defaults: { utm_source: "ig", utm_campaign: "fall" },
+      pass_click_id: true,
+      expires_at: new Date("2027-01-01T00:00:00Z"),
+    });
+    expect(await html(`/admin/links/${link.id}`)).toContain("https://yoy.fyi/fall");
+  });
+
+  test("shows the API's objections on the form", async () => {
+    const rejected = await adminPost(app, "/admin/services/yoy/links", { target_url: "http://10.0.0.1/" }, cookie);
+    expect(rejected.status).toBe(422);
+    expect(await rejected.text()).toContain("private_address");
+
+    await createLink(sql, serviceId, { code: "taken", target_url: "https://example.com/" });
+    const taken = await adminPost(app, "/admin/services/yoy/links", { target_url: "https://example.com/", code: "taken" }, cookie);
+    expect(taken.status).toBe(409);
+    expect(await taken.text()).toContain("already in use");
+  });
+
+  test("the service page lists links newest first and filters by status", async () => {
+    await createLink(sql, serviceId, { code: "first", target_url: "https://example.com/1" });
+    await createLink(sql, serviceId, { code: "second", target_url: "https://example.com/2", disabled_at: new Date() });
+
+    const all = await html("/admin/services/yoy");
+    const disabled = await html("/admin/services/yoy?status=disabled");
+
+    expect(all.indexOf(">second<")).toBeLessThan(all.indexOf(">first<"));
+    expect(disabled).toContain(">second<");
+    expect(disabled).not.toContain(">first<");
+  });
+
+  test("disables a link from its page", async () => {
+    const id = await createLink(sql, serviceId, { code: "bye", target_url: "https://example.com/" });
+
+    const res = await adminPost(app, `/admin/links/${id}/disable`, {}, cookie);
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(`/admin/links/${id}`);
+    expect(await html(`/admin/links/${id}`)).toContain("disabled");
+    expect((await app.request("https://yoy.fyi/bye")).status).toBe(410);
+  });
+
+  test("an unknown link is 404", async () => {
+    expect((await adminGet(app, `/admin/links/${Bun.randomUUIDv7()}`, cookie)).status).toBe(404);
+    expect((await adminGet(app, "/admin/links/nope", cookie)).status).toBe(404);
+  });
+});
