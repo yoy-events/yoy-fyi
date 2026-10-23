@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "geoip:fetch": "bash scripts/fetch-geoip.sh",
     "key:issue": "bun src/cli/issue-key.ts",
+    "lint": "biome lint .",
     "test:e2e": "bun tests/e2e/seed.ts && playwright test"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.2.4",
     "@playwright/test": "^1.64.1",
     "@types/bun": "^1.4.4",
     "@types/qrcode": "^1.5.6",

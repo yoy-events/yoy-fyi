@@ -12,13 +12,17 @@ beforeAll(async () => {
 test("runs the job and reports true", async () => {
   let ran = false;
 
-  expect(await exclusive(sql, "job-a", async () => void (ran = true))).toBe(true);
+  expect(await exclusive(sql, "job-a", async () => {
+    ran = true;
+  })).toBe(true);
   expect(ran).toBe(true);
 });
 
 test("skips a run while another holds the same job's lock", async () => {
   let release!: () => void;
-  const first = exclusive(sql, "job-b", () => new Promise<void>((r) => (release = r)));
+  const first = exclusive(sql, "job-b", () => new Promise<void>((r) => {
+    release = r;
+  }));
   await Bun.sleep(50);
 
   const second = await exclusive(sql, "job-b", async () => {
