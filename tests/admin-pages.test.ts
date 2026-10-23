@@ -178,3 +178,55 @@ describe("links", () => {
     expect((await adminGet(app, "/admin/links/nope", cookie)).status).toBe(404);
   });
 });
+
+describe("link analytics page", () => {
+  let serviceId: string;
+  let linkId: string;
+  const DAY = 86_400_000;
+  const today = () => new Date(Math.floor(Date.now() / DAY) * DAY);
+
+  beforeEach(async () => {
+    await issueKey(sql, { serviceSlug: "yoy", name: "k", scopes: ["links:read"] });
+    [{ id: serviceId }] = await sql`select id from services where slug = 'yoy'`;
+    linkId = await createLink(sql, serviceId, { code: "stats", target_url: "https://example.com/" });
+    const click = (at: Date, extra: Record<string, unknown> = {}) =>
+      addClick(sql, { link_id: linkId, service_id: serviceId, clicked_at: at.toISOString(), ...extra });
+    const t = today().getTime();
+    await click(new Date(t + 60_000), { visitor_hash: "a", referer_host: "t.co", country: "UA" });
+    await click(new Date(t + 120_000), { visitor_hash: "b", referer_host: "t.co", country: "PL" });
+    await click(new Date(t - DAY + 60_000), { visitor_hash: "a", referer_host: "google.com", country: "UA" });
+    await click(new Date(t + 180_000), { is_bot: true, referer_host: "t.me" });
+    const { rollupDays } = await import("../src/rollup");
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    await rollupDays(sql, day(new Date(t - DAY)), day(today()));
+  });
+
+  test("shows totals, a bar per day and breakdowns, bots excluded by default", async () => {
+    const page = await html(`/admin/links/${linkId}`);
+
+    expect(page).toMatch(/<strong>3<\/strong>\s*clicks/);
+    expect(page).toMatch(/<strong>1<\/strong>\s*bot/);
+    expect((page.match(/class="bar"/g) ?? []).length).toBe(30 + 48);
+    expect(page).toContain(`${today().toISOString().slice(0, 10)}: 2 clicks`);
+    expect(page).toContain("t.co");
+    expect(page).toContain("google.com");
+    expect(page).not.toContain("t.me");
+  });
+
+  test("range and bots are adjustable", async () => {
+    const page = await html(`/admin/links/${linkId}?range=7&bots=include`);
+
+    expect((page.match(/class="bar"/g) ?? []).length).toBe(7 + 48);
+    expect(page).toMatch(/<strong>4<\/strong>\s*clicks/);
+    expect(page).toContain("t.me");
+  });
+
+  test("embeds the QR code from an admin route", async () => {
+    expect(await html(`/admin/links/${linkId}`)).toContain(`src="/admin/links/${linkId}/qr.svg"`);
+
+    const qr = await adminGet(app, `/admin/links/${linkId}/qr.svg`, cookie);
+    expect(qr.headers.get("content-type")).toBe("image/svg+xml");
+    expect(await qr.text()).toStartWith("<svg");
+    expect((await adminGet(app, `/admin/links/${Bun.randomUUIDv7()}/qr.svg`, cookie)).status).toBe(404);
+  });
+});

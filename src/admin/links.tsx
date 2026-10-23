@@ -1,7 +1,25 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
+import QRCode from "qrcode";
+import { type Bots, type Scope, breakdown, timeseries } from "../analytics";
 import { type LinkRow, createLink, toLink } from "../links";
+import { DIMENSIONS, type Dimension } from "../rollup";
+import { BarChart, Ranking } from "./charts";
 import { Layout } from "./layout";
+
+const HOUR = 3_600_000;
+const DAY = 86_400_000;
+const RANGES = [7, 30, 90];
+const DIMENSION_TITLES: Record<Dimension, string> = {
+  referer_host: "Referrers",
+  utm_source: "UTM source",
+  utm_medium: "UTM medium",
+  utm_campaign: "UTM campaign",
+  country: "Countries",
+  device: "Devices",
+  browser: "Browsers",
+  os: "Operating systems",
+};
 
 type Deps = { sql: SQL; publicOrigin: string; resolveHost?: (host: string) => Promise<string[]> };
 type FormValues = Record<string, string>;
@@ -134,6 +152,28 @@ export function linkRoutes({ sql, publicOrigin, resolveHost }: Deps) {
       : [];
     if (!row) return c.notFound();
     const link = toLink(row as LinkRow, publicOrigin);
+
+    const range = RANGES.includes(Number(c.req.query("range"))) ? Number(c.req.query("range")) : 30;
+    const bots: Bots = c.req.query("bots") === "include" ? "include" : "exclude";
+    const now = Date.now();
+    const dayEnd = Math.floor(now / DAY) * DAY + DAY;
+    const hourEnd = Math.floor(now / HOUR) * HOUR + HOUR;
+    const scope = (from: number, to: number): Scope => ({
+      serviceId: row.service_id,
+      linkId: link.id,
+      tag: null,
+      from: new Date(from),
+      to: new Date(to),
+      bots,
+    });
+    const daily = await timeseries(sql, scope(dayEnd - range * DAY, dayEnd), "day");
+    const hourly = await timeseries(sql, scope(hourEnd - 48 * HOUR, hourEnd), "hour");
+    const rankings = await Promise.all(
+      (Object.keys(DIMENSIONS) as Dimension[]).map((d) => breakdown(sql, scope(dayEnd - range * DAY, dayEnd), d, 10)),
+    );
+    const query = (next: { range?: number; bots?: Bots }) =>
+      `?range=${next.range ?? range}&bots=${next.bots ?? bots}`;
+
     return c.html(
       <Layout title={link.code} signedIn>
         <p class="meta">
@@ -147,6 +187,37 @@ export function linkRoutes({ sql, publicOrigin, resolveHost }: Deps) {
           <span class={`badge ${link.status}`}>{link.status}</span>
           {link.tags.length > 0 && <span class="meta"> · {link.tags.join(", ")}</span>}
         </p>
+        <img src={`/admin/links/${link.id}/qr.svg`} alt={`QR code for ${link.short_url}`} class="qr" width="160" height="160" />
+        <nav class="filters">
+          {RANGES.map((r) => (
+            <a href={query({ range: r })} aria-current={r === range ? "page" : undefined}>
+              {r} days
+            </a>
+          ))}
+          <a href={query({ bots: bots === "include" ? "exclude" : "include" })}>
+            {bots === "include" ? "Hide bots" : "Include bots"}
+          </a>
+        </nav>
+        <p class="totals">
+          <span>
+            <strong>{daily.totals.clicks}</strong> clicks
+          </span>
+          <span>
+            <strong>{daily.totals.uniques_upper_bound}</strong> visitors (upper bound)
+          </span>
+          <span>
+            <strong>{daily.totals.bot_clicks}</strong> bot clicks
+          </span>
+        </p>
+        <h2>Daily</h2>
+        <BarChart points={daily.points} label={(t) => t.toISOString().slice(0, 10)} />
+        <h2>Last 48 hours</h2>
+        <BarChart points={hourly.points} label={(t) => `${t.toISOString().slice(0, 13).replace("T", " ")}:00`} />
+        <div class="rankings">
+          {rankings.map((r) => (
+            <Ranking title={DIMENSION_TITLES[r.dimension]} items={r.items} total={r.total_clicks} />
+          ))}
+        </div>
         {link.status !== "disabled" && (
           <form method="post" action={`/admin/links/${link.id}/disable`}>
             <button type="submit" class="danger">
@@ -156,6 +227,14 @@ export function linkRoutes({ sql, publicOrigin, resolveHost }: Deps) {
         )}
       </Layout>,
     );
+  });
+
+  app.get("/links/:id/qr.svg", async (c) => {
+    const id = c.req.param("id");
+    const [row] = /^[0-9a-f-]{36}$/i.test(id) ? await sql`select code from links where id = ${id}` : [];
+    if (!row) return c.notFound();
+    const svg = await QRCode.toString(`${publicOrigin}/${row.code}`, { type: "svg", margin: 2 });
+    return c.body(svg, 200, { "Content-Type": "image/svg+xml" });
   });
 
   app.post("/links/:id/disable", async (c) => {
