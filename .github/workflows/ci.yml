@@ -47,7 +47,6 @@ jobs:
       (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')
     runs-on: [self-hosted, yoy-fyi]
     timeout-minutes: 15
-    environment: ${{ github.event_name == 'push' && 'production' || 'test' }}
     concurrency:
       group: deploy-${{ github.event_name == 'push' && 'prod' || 'test' }}
       cancel-in-progress: false
