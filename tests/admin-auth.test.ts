@@ -24,12 +24,16 @@ beforeEach(async () => {
 
 const ORIGIN = { origin: "https://yoy.fyi" };
 const form = (fields: Record<string, string>) => new URLSearchParams(fields).toString();
-const post = (path: string, fields: Record<string, string>, headers: Record<string, string> = {}, target = app) =>
-  target.request(`https://yoy.fyi${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", ...ORIGIN, ...headers },
-    body: form(fields),
-  });
+const post = (path: string, fields: Record<string, string>, headers: Record<string, string> = {}, target = app, ip?: string) =>
+  target.request(
+    `https://yoy.fyi${path}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...ORIGIN, ...headers },
+      body: form(fields),
+    },
+    { ip },
+  );
 const get = (path: string, headers: Record<string, string> = {}) => app.request(`https://yoy.fyi${path}`, { headers });
 
 const tokenFromMail = () => new URL(/https:\/\/\S+/.exec(mail.sent.at(-1)!.text)![0]).searchParams.get("token")!;
@@ -158,7 +162,7 @@ describe("admin sign-in", () => {
   test("login requests are limited per IP", async () => {
     const statuses = [];
     for (let i = 0; i < 6; i++) {
-      statuses.push((await post("/admin/login", { email: "x@example.com" }, { "fly-client-ip": "203.0.113.5" })).status);
+      statuses.push((await post("/admin/login", { email: "x@example.com" }, {}, app, "203.0.113.5")).status);
     }
 
     expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);

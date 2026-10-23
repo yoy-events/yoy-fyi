@@ -53,7 +53,7 @@ export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
 
   // Always the same answer, so the page does not reveal which address is the admin's.
   app.post("/login", async (c) => {
-    const ip = c.req.header("fly-client-ip") ?? c.env?.ip;
+    const ip = c.env?.ip;
     if (ip && !limitLogin(rateLimitKey(ip)).ok) return c.html(loginPage("Too many attempts. Try again later."), 429);
 
     const email = String((await c.req.parseBody()).email ?? "").trim().toLowerCase();

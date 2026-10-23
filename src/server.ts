@@ -1,5 +1,6 @@
 import { SQL } from "bun";
 import { createApp } from "./app";
+import { clientIp } from "./client-ip";
 import { loadConfig } from "./config";
 import { resendSender } from "./email";
 import { loadCountryLookup } from "./geo";
@@ -40,6 +41,6 @@ const app = createApp({
 
 const server = Bun.serve({
   port: config.port,
-  fetch: (req, server) => app.fetch(req, { ip: server.requestIP(req)?.address }),
+  fetch: (req, server) => app.fetch(req, { ip: clientIp(req, server.requestIP(req)?.address, config.clientIpHeader) }),
 });
 console.log(`yoy-fyi listening on :${server.port} as ${config.publicOrigin}`);

@@ -25,8 +25,7 @@ export type AppDeps = {
   admin?: AdminConfig;
 };
 
-// The server passes the socket address as `ip`. In production the app port is reachable only
-// through Fly's proxy, which overwrites Fly-Client-IP, so the header can be trusted there.
+// The server resolves the visitor's IP once (see client-ip.ts) and passes it as `ip`.
 type Env = { Bindings: { ip?: string } };
 
 const CODE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -99,7 +98,7 @@ export function createApp({
     if (!link) return c.html(page("Not found", "This short link does not exist."), 404);
     if (link.gone) return c.html(page("Link no longer available", "This short link was disabled or has expired."), 410);
 
-    const ip = c.req.header("fly-client-ip") ?? c.env?.ip ?? null;
+    const ip = c.env?.ip ?? null;
     if (ip) {
       const limit = limitRedirect(rateLimitKey(ip));
       if (!limit.ok) {

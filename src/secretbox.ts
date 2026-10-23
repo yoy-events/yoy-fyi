@@ -1,5 +1,5 @@
 // AES-256-GCM for secrets that must be read back (webhook signing secrets). The key is
-// WEBHOOK_ENC_KEY, 32 random bytes in base64, kept as a Fly secret.
+// WEBHOOK_ENC_KEY, 32 random bytes in base64, kept as a server secret.
 export async function loadSecretKey(base64: string): Promise<CryptoKey> {
   const raw = Buffer.from(base64, "base64");
   if (raw.length !== 32) throw new Error("WEBHOOK_ENC_KEY must be 32 bytes, base64-encoded");

@@ -25,11 +25,9 @@ beforeEach(async () => {
 const appWith = (deps: Partial<AppDeps> = {}) =>
   createApp({ sql, publicOrigin: "https://yoy.fyi", countryOf: () => null, ...deps });
 
-const hit = (path: string, headers: Record<string, string> = {}, deps: Partial<AppDeps> = {}, method = "GET") =>
-  appWith(deps).request(`https://yoy.fyi${path}`, {
-    method,
-    headers: { "user-agent": IPHONE_SAFARI, "fly-client-ip": IP, ...headers },
-  });
+// `ip` stands in for the address the server resolves; every other entry is a request header.
+const hit = (path: string, { ip = IP, ...headers }: Record<string, string> = {}, deps: Partial<AppDeps> = {}, method = "GET") =>
+  appWith(deps).request(`https://yoy.fyi${path}`, { method, headers: { "user-agent": IPHONE_SAFARI, ...headers } }, { ip });
 
 const clicks = () => sql`select * from clicks order by clicked_at`;
 
@@ -99,7 +97,7 @@ describe("click capture", () => {
   test("the visitor hash is stable within a day and differs between visitors", async () => {
     await hit("/go");
     await hit("/go");
-    await hit("/go", { "fly-client-ip": "198.51.100.9" });
+    await hit("/go", { ip: "198.51.100.9" });
 
     const hashes = (await clicks()).map((c: { visitor_hash: string }) => c.visitor_hash);
     expect(hashes[0]).toBe(hashes[1]);

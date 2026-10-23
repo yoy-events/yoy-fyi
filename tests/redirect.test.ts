@@ -97,7 +97,7 @@ describe("protection", () => {
       countryOf: () => null,
       redirectLimit: { perMinute: 120, burst: 2 },
     });
-    const hit = (ip: string) => limited.request("https://yoy.fyi/rl", { headers: { "fly-client-ip": ip } });
+    const hit = (ip: string) => limited.request("https://yoy.fyi/rl", {}, { ip });
 
     expect((await hit("203.0.113.1")).status).toBe(302);
     expect((await hit("203.0.113.1")).status).toBe(302);
@@ -108,6 +108,21 @@ describe("protection", () => {
 
     const [{ count }] = await sql`select count(*)::int as count from clicks`;
     expect(count).toBe(3);
+  });
+
+  test("client-supplied IP headers do not change the rate-limit key", async () => {
+    await createLink(sql, serviceId, { code: "rl", target_url: "https://example.com/" });
+    const limited = createApp({
+      sql,
+      publicOrigin: "https://yoy.fyi",
+      countryOf: () => null,
+      redirectLimit: { perMinute: 120, burst: 1 },
+    });
+    const hit = (spoofed: string) =>
+      limited.request("https://yoy.fyi/rl", { headers: { "fly-client-ip": spoofed, "cf-connecting-ip": spoofed } }, { ip: "203.0.113.1" });
+
+    expect((await hit("198.51.100.1")).status).toBe(302);
+    expect((await hit("198.51.100.2")).status).toBe(429);
   });
 
   test("HTML pages carry CSP, HSTS and frame options", async () => {
