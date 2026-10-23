@@ -147,3 +147,71 @@ describe("GET /v1/analytics/timeseries", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("GET /v1/analytics/breakdown", () => {
+  beforeEach(async () => {
+    await click(fall, "2026-03-10T09:00:00Z", { referer_host: "t.co", country: "UA" });
+    await click(fall, "2026-03-10T10:00:00Z", { referer_host: "t.co", country: "UA" });
+    await click(fall, "2026-03-11T10:00:00Z", { referer_host: "google.com", country: "PL" });
+    await click(fall, "2026-03-11T11:00:00Z", { country: "UA" });
+    await click(fall, "2026-03-11T12:00:00Z", { referer_host: "t.co", is_bot: true });
+    await click(plain, "2026-03-11T12:00:00Z", { referer_host: "x.com" });
+    await rollupDays(sql, "2026-03-10", "2026-03-11");
+  });
+
+  const breakdown = async (query: string) => {
+    const res = await get(`/v1/analytics/breakdown?${query}`);
+    expect(res.status).toBe(200);
+    return res.json();
+  };
+
+  test("groups clicks by a dimension, highest first, rounded out to whole days", async () => {
+    const body = await breakdown(
+      `link_id=${fall}&dimension=referer_host&from=2026-03-10T05:00:00Z&to=2026-03-11T23:00:00Z`,
+    );
+
+    expect(body).toEqual({
+      dimension: "referer_host",
+      from: "2026-03-10T00:00:00.000Z",
+      to: "2026-03-12T00:00:00.000Z",
+      bots: "exclude",
+      total_clicks: 4,
+      other_clicks: 0,
+      items: [
+        { value: "t.co", clicks: 2 },
+        { value: "google.com", clicks: 1 },
+        { value: null, clicks: 1 },
+      ],
+    });
+  });
+
+  test("limit keeps the top values and sums the rest into other_clicks", async () => {
+    const body = await breakdown(`link_id=${fall}&dimension=country&limit=1&from=2026-03-10T00:00:00Z&to=2026-03-12T00:00:00Z`);
+
+    expect(body.items).toEqual([{ value: "UA", clicks: 3 }]);
+    expect(body.other_clicks).toBe(1);
+    expect(body.total_clicks).toBe(4);
+  });
+
+  test("covers the whole service by default and respects bots", async () => {
+    const all = await breakdown("dimension=referer_host&bots=include&from=2026-03-10T00:00:00Z&to=2026-03-12T00:00:00Z");
+
+    expect(all.total_clicks).toBe(6);
+    expect(all.items[0]).toEqual({ value: "t.co", clicks: 3 });
+  });
+
+  test.each([
+    "from=2026-03-10T00:00:00Z&to=2026-03-12T00:00:00Z",
+    "dimension=ip&from=2026-03-10T00:00:00Z&to=2026-03-12T00:00:00Z",
+    "dimension=country&limit=0&from=2026-03-10T00:00:00Z&to=2026-03-12T00:00:00Z",
+    "dimension=country&limit=101&from=2026-03-10T00:00:00Z&to=2026-03-12T00:00:00Z",
+  ])("rejects %s with 400", async (query) => {
+    expect((await get(`/v1/analytics/breakdown?${query}`)).status).toBe(400);
+  });
+
+  test("rejects more than 400 days with 422", async () => {
+    const res = await get("/v1/analytics/breakdown?dimension=country&from=2025-01-01T00:00:00Z&to=2026-02-06T00:00:00Z");
+
+    expect(res.status).toBe(422);
+  });
+});

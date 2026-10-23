@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { type AuthEnv, requireScope } from "./auth";
 import { apiError, isUuid } from "./http";
+import { DIMENSIONS } from "./rollup";
 
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 const TAG = /^[a-z0-9][a-z0-9_:.-]{0,39}$/;
@@ -87,6 +88,38 @@ export function analyticsRoutes(sql: SQL) {
         bot_clicks: totals.bot_clicks,
       },
       points: points.map((p: { t: Date; clicks: number; uniques: number }) => ({ t: p.t, clicks: p.clicks, uniques: p.uniques })),
+    });
+  });
+
+  app.get("/analytics/breakdown", requireScope("analytics:read"), async (c) => {
+    const dimension = c.req.query("dimension") ?? "";
+    const rawLimit = c.req.query("limit");
+    const limit = rawLimit === undefined ? 20 : Number(rawLimit);
+    if (!Object.hasOwn(DIMENSIONS, dimension) || !Number.isInteger(limit) || limit < 1 || limit > 100) {
+      return apiError(c, 400, "invalid_request", "Invalid dimension or limit.");
+    }
+    const scope = await parseScope(c, sql, DAY, MAX_RANGE.day);
+    if (scope instanceof Response) return scope;
+
+    const rows = await sql`
+      select value, sum(clicks)::int as clicks
+      from link_dims_daily
+      where ${scopeFilter(sql, scope)} and ${botFilter(sql, scope.bots)}
+        and dim = ${dimension} and bucket >= ${scope.from} and bucket < ${scope.to}
+      group by value
+      order by clicks desc, value asc nulls last`;
+    const items = rows.slice(0, limit).map((r: { value: string | null; clicks: number }) => ({ value: r.value, clicks: r.clicks }));
+    const total = rows.reduce((sum: number, r: { clicks: number }) => sum + r.clicks, 0);
+    const shown = items.reduce((sum: number, r: { clicks: number }) => sum + r.clicks, 0);
+
+    return c.json({
+      dimension,
+      from: scope.from,
+      to: scope.to,
+      bots: scope.bots,
+      total_clicks: total,
+      other_clicks: total - shown,
+      items,
     });
   });
 
