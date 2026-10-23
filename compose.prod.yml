@@ -1,0 +1,49 @@
+# Production and test stacks on the yoy-fyi VM (ADR-0002). The deploy workflow runs:
+#   docker compose -p yoy-fyi      -f compose.prod.yml --env-file deploy/prod.env up -d --build --wait
+#   docker compose -p yoy-fyi-test -f compose.prod.yml --env-file deploy/test.env up -d --build --wait
+# Non-secret settings live in deploy/<stage>.env (in git); secrets only in /etc/yoy-fyi/<stage>/ on the VM.
+# Nothing publishes a port: cloudflared is the only way in.
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: yoy
+      POSTGRES_DB: yoy_fyi
+    env_file: /etc/yoy-fyi/${STAGE:?}/db.env # POSTGRES_PASSWORD
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yoy -d yoy_fyi"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    image: yoy-fyi:${STAGE:?}
+    restart: unless-stopped
+    env_file:
+      - deploy/${STAGE:?}.env
+      - /etc/yoy-fyi/${STAGE:?}/app.env # DATABASE_URL, SESSION_SECRET, WEBHOOK_ENC_KEY, RESEND_API_KEY
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.3
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    env_file: /etc/yoy-fyi/${STAGE:?}/tunnel.env # TUNNEL_TOKEN; the tunnel routes its hostnames to http://app:3000
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  db:

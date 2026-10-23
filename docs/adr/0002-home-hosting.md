@@ -26,7 +26,7 @@ Hosting must cost nothing. Roman's Windows Pro machine runs around the clock. Fl
 - `app`: the image built from the repo's `Dockerfile` (Bun, DB-IP Lite fetched at build time). It migrates on boot, as it does now. No published port.
 - `cloudflared`: Cloudflare Tunnel, the only way in. It routes `yoy.fyi` and `a.yoy.fyi` to `app:3000`.
 
-The test app is the same file run as project `yoy-fyi-test`, with its own database volume, served at `test.yoy.fyi` through a second rule on the same tunnel.
+The test app is the same file run as project `yoy-fyi-test`, with its own database volume and its own tunnel, served at `test.yoy.fyi`. A tunnel per stack keeps the two compose networks apart.
 
 A deploy recreates only the `app` container. Postgres keeps running, so the redirect gap is a few seconds instead of a machine restart.
 
@@ -43,8 +43,8 @@ A deploy recreates only the `app` container. Postgres keeps running, so the redi
 
 ### Config and secrets
 
-- Non-secret config lives in `compose.prod.yml` per project, in git: `PUBLIC_ORIGIN`, `ADMIN_EMAIL`, `MAIL_FROM`, `CLIENT_IP_HEADER`. `PUBLIC_ORIGIN` stays the only domain literal.
-- Secrets live only on the VM, in `/etc/yoy-fyi/prod.env` and `/etc/yoy-fyi/test.env` (mode 0640, readable by the runner user): `DATABASE_URL` password, `SESSION_SECRET`, `WEBHOOK_ENC_KEY`, `RESEND_API_KEY`, and the tunnel token. They are not in GitHub.
+- Non-secret config lives in `deploy/prod.env` and `deploy/test.env`, in git: `PUBLIC_ORIGIN`, `ADMIN_EMAIL`, `MAIL_FROM`, `CLIENT_IP_HEADER`. `PUBLIC_ORIGIN` stays the only domain literal.
+- Secrets live only on the VM, in `/etc/yoy-fyi/<stage>/{db,app,tunnel}.env` (mode 0640, readable by the runner user): the Postgres password, `DATABASE_URL`, `SESSION_SECRET`, `WEBHOOK_ENC_KEY`, `RESEND_API_KEY`, and the tunnel token. Each container gets only its own file. They are not in GitHub.
 - Resend: Roman's existing paid account.
 
 ### Delivery
