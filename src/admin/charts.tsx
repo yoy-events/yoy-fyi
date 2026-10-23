@@ -10,7 +10,7 @@ export function BarChart({ points, label }: { points: Point[]; label: (t: Date) 
   const barWidth = width / points.length;
   return (
     <figure class="chart">
-      <svg viewBox={`0 0 ${width} ${height + 16}`} role="img" aria-label={`Bar chart, peak ${max} clicks`}>
+      <svg viewBox={`0 0 ${width} ${height + 28}`} role="img" aria-label={`Bar chart, peak ${max} clicks`}>
         {points.map((p, i) => {
           const h = Math.round((p.clicks / max) * height);
           return (
@@ -20,10 +20,10 @@ export function BarChart({ points, label }: { points: Point[]; label: (t: Date) 
           );
         })}
         <line class="axis" x1="0" y1={height} x2={width} y2={height} />
-        <text x="0" y={height + 13} class="tick">
+        <text x="0" y={height + 24} class="tick">
           {label(points[0]!.t)}
         </text>
-        <text x={width} y={height + 13} class="tick" text-anchor="end">
+        <text x={width} y={height + 24} class="tick" text-anchor="end">
           {label(points.at(-1)!.t)}
         </text>
       </svg>

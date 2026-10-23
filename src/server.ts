@@ -1,6 +1,7 @@
 import { SQL } from "bun";
 import { createApp } from "./app";
 import { loadConfig } from "./config";
+import { resendSender } from "./email";
 import { loadCountryLookup } from "./geo";
 import { every } from "./jobs";
 import { migrate } from "./migrate";
@@ -30,6 +31,11 @@ const app = createApp({
   publicOrigin: config.publicOrigin,
   countryOf: await loadCountryLookup(config.geoipDbPath),
   webhookKey,
+  admin: {
+    email: config.adminEmail,
+    sessionSecret: config.sessionSecret,
+    sendEmail: resendSender(config.resendApiKey, config.mailFrom),
+  },
 });
 
 const server = Bun.serve({

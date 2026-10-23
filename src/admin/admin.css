@@ -1,0 +1,127 @@
+/* Admin UI: mobile-first, works from 360 px, follows the system light/dark setting. */
+:root {
+  color-scheme: light dark;
+  --bg: #fafaf9;
+  --fg: #1c1917;
+  --muted: #78716c;
+  --line: #e7e5e4;
+  --card: #ffffff;
+  --accent: #2563eb;
+  --danger: #b91c1c;
+  --ok: #15803d;
+  --warn: #a16207;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0a09;
+    --fg: #f5f5f4;
+    --muted: #a8a29e;
+    --line: #292524;
+    --card: #1c1917;
+    --accent: #60a5fa;
+    --danger: #f87171;
+    --ok: #4ade80;
+    --warn: #facc15;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+header form { margin: 0; }
+main { max-width: 960px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 1.5rem; margin: 0 0 12px; overflow-wrap: anywhere; }
+h2 { font-size: 1.125rem; margin: 24px 0 8px; }
+h3 { font-size: 1rem; margin: 0 0 4px; }
+a { color: var(--accent); }
+.brand { font-weight: 700; text-decoration: none; color: var(--fg); }
+code, pre { font: 0.875rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+pre.secret { padding: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; user-select: all; }
+.meta { color: var(--muted); font-size: 0.875rem; }
+.notice { padding: 8px 12px; border-left: 3px solid var(--warn); background: var(--card); }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+.list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.list li > :first-child { font-weight: 600; }
+.list li .meta { flex: 1 1 100%; }
+.list li form { margin: 0; }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 24px 0; }
+.card h2 { margin-top: 0; }
+.stack { display: grid; gap: 12px; }
+label { display: grid; gap: 4px; font-size: 0.875rem; font-weight: 600; }
+label.check { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: grid; gap: 4px; }
+input:not([type="checkbox"]) {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+input[type="checkbox"] { width: 20px; height: 20px; }
+button {
+  min-height: 44px;
+  padding: 8px 16px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+button.link { background: none; color: var(--accent); padding: 0; min-height: 0; font-weight: 400; }
+.errors { margin: 0; padding: 8px 12px 8px 28px; color: var(--danger); border: 1px solid var(--danger); border-radius: 8px; }
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+.filters a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; font-size: 0.875rem; }
+.filters a[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.badge { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.badge.active { color: var(--ok); }
+.badge.expired { color: var(--warn); }
+.badge.disabled { color: var(--danger); }
+
+.qr { display: block; width: 160px; height: 160px; margin: 12px 0; background: #fff; border-radius: 8px; }
+.totals { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.totals strong { font-size: 1.5rem; }
+.chart { margin: 0; }
+.chart svg { width: 100%; height: auto; display: block; }
+.chart .bar { fill: var(--accent); }
+.chart .axis { stroke: var(--line); }
+/* The chart's viewBox is 600 wide and drawn at ~340 px on a phone, so 20 units ≈ 11 px. */
+.chart .tick { fill: var(--muted); font-size: 20px; }
+.rankings { display: grid; gap: 16px; margin: 24px 0; }
+.ranking table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 0.875rem; }
+.ranking td { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.ranking td.num { width: 3.5em; text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; }
+.ranking td.share { width: 30%; }
+.ranking svg { width: 100%; height: 8px; display: block; }
+.ranking .share-bar { fill: var(--accent); }
+
+@media (min-width: 720px) {
+  .list li .meta { flex: 1 1 auto; }
+  .rankings { grid-template-columns: 1fr 1fr; }
+}

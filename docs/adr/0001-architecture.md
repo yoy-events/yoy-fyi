@@ -114,7 +114,7 @@ Services:
 Admin:
 
 - `ADMIN_EMAIL` lives in `fly.toml [env]`. `POST /admin/login` always answers the same way, and sends a Resend email only when the address matches.
-- The token is 32 random bytes, stored as a sha256 hash, valid for 15 minutes, single use. The session is an HMAC-signed cookie (`__Host-`, HttpOnly, Secure, SameSite=Lax, 7 days). Forms carry a CSRF token.
+- The token is 32 random bytes, stored as a sha256 hash, valid for 15 minutes, single use. The session is an HMAC-signed cookie (`__Host-`, HttpOnly, Secure, SameSite=Lax, 7 days). Admin form posts must carry an `Origin` header matching `PUBLIC_ORIGIN` (Hono `csrf`), which replaces a per-form CSRF token. Opening the emailed link only shows a confirm button, so mail scanners that prefetch links cannot use the token up.
 
 Secrets (Fly secrets, never in `[env]`, never logged): `SESSION_SECRET`, `WEBHOOK_ENC_KEY`, `RESEND_API_KEY`, Tigris credentials. Request logging redacts `Authorization` and any `yfi_` substring.
 
