@@ -87,3 +87,44 @@ test("GET /health is not treated as a code", async () => {
   expect(res.status).toBe(200);
   expect(await res.json()).toEqual({ ok: true });
 });
+
+describe("protection", () => {
+  test("rate-limits redirects per client IP and records nothing once limited", async () => {
+    await createLink(sql, serviceId, { code: "rl", target_url: "https://example.com/" });
+    const limited = createApp({
+      sql,
+      publicOrigin: "https://yoy.fyi",
+      countryOf: () => null,
+      redirectLimit: { perMinute: 120, burst: 2 },
+    });
+    const hit = (ip: string) => limited.request("https://yoy.fyi/rl", { headers: { "fly-client-ip": ip } });
+
+    expect((await hit("203.0.113.1")).status).toBe(302);
+    expect((await hit("203.0.113.1")).status).toBe(302);
+    const res = await hit("203.0.113.1");
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("1");
+    expect((await hit("203.0.113.2")).status).toBe(302);
+
+    const [{ count }] = await sql`select count(*)::int as count from clicks`;
+    expect(count).toBe(3);
+  });
+
+  test("HTML pages carry CSP, HSTS and frame options", async () => {
+    const res = await get("/nope");
+
+    expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(res.headers.get("strict-transport-security")).toContain("max-age=");
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  test("redirects send HSTS and let the target see the yoy.fyi origin", async () => {
+    await createLink(sql, serviceId, { code: "h", target_url: "https://example.com/" });
+
+    const res = await get("/h");
+
+    expect(res.headers.get("strict-transport-security")).toContain("max-age=");
+    expect(res.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+  });
+});

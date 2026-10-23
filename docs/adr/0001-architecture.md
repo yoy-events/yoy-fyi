@@ -131,7 +131,7 @@ Checked on create and update:
 In-memory token buckets. Correct for one machine; they move to Postgres when there is more than one.
 
 - Link create: 60/min per API key, burst 20.
-- Redirects: 120/min per client IP (hashed key), burst 60. When exceeded, return 429 and record nothing.
+- Redirects: 120/min per client IP, burst 60. The IP is a key in process memory only, never persisted or logged. When exceeded, return 429 and record nothing.
 - Admin login: 5 per 15 min per IP.
 
 ### Analytics storage
