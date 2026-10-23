@@ -1,4 +1,6 @@
 import type { SQL } from "bun";
+import { openSecret } from "./secretbox";
+import { checkTarget } from "./target-policy";
 
 const BATCH = 500;
 const SETTLE_MS = 5_000;
@@ -110,4 +112,91 @@ export async function fanOut(
              where name = 'webhooks'`;
     return rows.length;
   });
+}
+
+const CLAIM = 20;
+const TIMEOUT_MS = 5_000;
+const LEASE_MS = 60_000;
+const BASE_BACKOFF_MS = 30_000;
+const MAX_BACKOFF_MS = 6 * 3_600_000;
+// 30 s doubling, capped at 6 h: the 14th attempt lands about 24 h after the first.
+const MAX_ATTEMPTS = 14;
+
+type DeliverDeps = {
+  key: CryptoKey;
+  ownHost: string;
+  fetch?: typeof fetch;
+  resolveHost?: (host: string) => Promise<string[]>;
+  now?: () => Date;
+  random?: () => number;
+};
+
+export function sign(secret: string, timestamp: number, body: string): string {
+  const mac = new Bun.CryptoHasher("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
+  return `t=${timestamp},v1=${mac}`;
+}
+
+// Claims due deliveries with a one-minute lease (so a crash only delays them), POSTs each,
+// and records the outcome. Returns how many deliveries were attempted.
+export async function deliverDue(sql: SQL, deps: DeliverDeps): Promise<number> {
+  const { key, ownHost, fetch: send = fetch, resolveHost, now = () => new Date(), random = Math.random } = deps;
+  const at = now();
+  const claimed: { id: string; payload: unknown; attempts: number; url: string; secret_enc: string }[] = await sql`
+    with due as (
+      select d.id from webhook_deliveries d join webhooks w on w.id = d.webhook_id
+      where d.status = 'pending' and d.next_attempt_at <= ${at} and w.disabled_at is null
+      order by d.next_attempt_at
+      limit ${CLAIM}
+      for update of d skip locked
+    )
+    update webhook_deliveries d set next_attempt_at = ${new Date(at.getTime() + LEASE_MS)}
+    from due, webhooks w
+    where d.id = due.id and w.id = d.webhook_id
+    returning d.id, d.payload, d.attempts, w.url, w.secret_enc`;
+
+  await Promise.all(
+    claimed.map(async (d) => {
+      let status: number | null = null;
+      let error: string | null = null;
+      const rejection = await checkTarget(d.url, { ownHost, resolve: resolveHost });
+      if (rejection) {
+        error = `target_rejected: ${rejection}`;
+      } else {
+        const body = JSON.stringify(d.payload);
+        try {
+          const res = await send(d.url, {
+            method: "POST",
+            body,
+            redirect: "manual",
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+            headers: {
+              "Content-Type": "application/json",
+              "Yoy-Event": "link.clicked",
+              "Yoy-Delivery": d.id,
+              "Yoy-Signature": sign(await openSecret(key, d.secret_enc), Math.floor(at.getTime() / 1000), body),
+            },
+          });
+          await res.body?.cancel();
+          status = res.status;
+          if (status < 200 || status >= 300) error = `HTTP ${status}`;
+        } catch (err) {
+          error = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+        }
+      }
+
+      const attempts = d.attempts + 1;
+      if (!error) {
+        await sql`update webhook_deliveries set status = 'delivered', attempts = ${attempts}, last_status = ${status},
+                    last_error = null, next_attempt_at = null, delivered_at = ${at} where id = ${d.id}`;
+      } else if (attempts >= MAX_ATTEMPTS) {
+        await sql`update webhook_deliveries set status = 'dead', attempts = ${attempts}, last_status = ${status},
+                    last_error = ${error}, next_attempt_at = null where id = ${d.id}`;
+      } else {
+        const backoff = Math.min(BASE_BACKOFF_MS * 2 ** (attempts - 1), MAX_BACKOFF_MS) * (0.8 + 0.4 * random());
+        await sql`update webhook_deliveries set attempts = ${attempts}, last_status = ${status}, last_error = ${error},
+                    next_attempt_at = ${new Date(at.getTime() + backoff)} where id = ${d.id}`;
+      }
+    }),
+  );
+  return claimed.length;
 }

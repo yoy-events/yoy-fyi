@@ -169,7 +169,7 @@ The `clicks` table is the outbox. Redirects never write a second row.
 
 1. Fan-out loop (every 2 s): read clicks with `id > outbox_cursor.last_click_id` whose service has an active webhook. Insert one `webhook_deliveries` row per (webhook, click) and advance the cursor, all in one transaction. UUIDv7 ordering makes the cursor monotonic.
 2. Delivery loop: pick due rows with `FOR UPDATE SKIP LOCKED` and POST with a 5 s timeout. Any 2xx counts as delivered.
-3. Retries back off exponentially (30 s × 2ⁿ with jitter, capped at 6 h) for up to 12 attempts, about 24 h. After that the row is marked dead and shown in admin.
+3. Retries back off exponentially (30 s × 2ⁿ with jitter, capped at 6 h) for up to 14 attempts, about 24 h (12 attempts would only reach about 14.5 h). After that the row is marked dead and shown in admin.
 4. Signature: header `Yoy-Signature: t=<unix>,v1=<hex hmac-sha256(secret, t + "." + body)>`. Receivers reject timestamps older than 5 minutes.
 5. Webhook secrets are encrypted at rest with AES-GCM under `WEBHOOK_ENC_KEY`, because signing needs the plaintext. The secret is shown once, at registration.
 6. Webhook URLs get the same validation as targets, and the private-range check is repeated at each delivery against the resolved IP (SSRF).
