@@ -122,3 +122,51 @@ describe("webhook registration", () => {
     expect((await call("GET", "/v1/webhooks/nope")).status).toBe(404);
   });
 });
+
+describe("GET /v1/webhooks/{id}/deliveries", () => {
+  const addDelivery = async (webhookId: string, status: string) => {
+    const id = Bun.randomUUIDv7();
+    const clickId = Bun.randomUUIDv7();
+    await sql`insert into webhook_deliveries (id, webhook_id, click_id, payload, status, attempts, last_status, last_error)
+              values (${id}, ${webhookId}, ${clickId}, '{}', ${status}, 2, 500, 'HTTP 500')`;
+    return { id, clickId };
+  };
+
+  test("lists deliveries newest first with their outcome, filtered by status, paged", async () => {
+    const { webhook } = await (await call("POST", "/v1/webhooks", { url: "https://a.example.com/" })).json();
+    const first = await addDelivery(webhook.id, "dead");
+    const second = await addDelivery(webhook.id, "pending");
+    const third = await addDelivery(webhook.id, "dead");
+
+    const all = await (await call("GET", `/v1/webhooks/${webhook.id}/deliveries`)).json();
+    const dead = await (await call("GET", `/v1/webhooks/${webhook.id}/deliveries?status=dead&limit=1`)).json();
+    const deadNext = await (
+      await call("GET", `/v1/webhooks/${webhook.id}/deliveries?status=dead&limit=1&cursor=${dead.next_cursor}`)
+    ).json();
+
+    expect(all.data.map((d: { id: string }) => d.id)).toEqual([third.id, second.id, first.id]);
+    expect(all.data[0]).toEqual({
+      id: third.id,
+      event_id: third.clickId,
+      status: "dead",
+      attempts: 2,
+      next_attempt_at: expect.any(String),
+      last_status: 500,
+      last_error: "HTTP 500",
+      created_at: expect.any(String),
+      delivered_at: null,
+    });
+    expect(Object.keys(all.data[0])).not.toContain("payload");
+    expect(dead.data.map((d: { id: string }) => d.id)).toEqual([third.id]);
+    expect(deadNext.data.map((d: { id: string }) => d.id)).toEqual([first.id]);
+    expect(deadNext.next_cursor).toBeNull();
+  });
+
+  test("another service's webhook is 404; a bad status is 400", async () => {
+    const { token: other } = await issueKey(sql, { serviceSlug: "diduny", name: "o", scopes: ["webhooks:manage"] });
+    const { webhook } = await (await call("POST", "/v1/webhooks", { url: "https://a.example.com/" })).json();
+
+    expect((await call("GET", `/v1/webhooks/${webhook.id}/deliveries`, undefined, other)).status).toBe(404);
+    expect((await call("GET", `/v1/webhooks/${webhook.id}/deliveries?status=lost`)).status).toBe(400);
+  });
+});

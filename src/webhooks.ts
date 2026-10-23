@@ -1,7 +1,15 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { type AuthEnv, requireScope } from "./auth";
-import { apiError, isUuid, readJsonObject, validationFailed } from "./http";
+import {
+  apiError,
+  decodeCursor,
+  encodeCursor,
+  isUuid,
+  parseLimit,
+  readJsonObject,
+  validationFailed,
+} from "./http";
 import { randomBase62 } from "./keys";
 import { sealSecret } from "./secretbox";
 import { type TargetRejection, checkTarget } from "./target-policy";
@@ -102,6 +110,28 @@ export function webhookRoutes({ sql, publicOrigin, webhookKey, resolveHost }: De
     const row = await findOwn(c.req.param("id"), c.get("caller").serviceId);
     if (!row) return apiError(c, 404, "not_found", "Webhook not found.");
     return c.json(toWebhook(row));
+  });
+
+  app.get("/webhooks/:id/deliveries", async (c) => {
+    const limit = parseLimit(c.req.query("limit"));
+    const cursor = decodeCursor(c.req.query("cursor"));
+    const status = c.req.query("status") ?? null;
+    if (limit === null || cursor === null || (status !== null && !["pending", "delivered", "dead"].includes(status))) {
+      return apiError(c, 400, "invalid_request", "Invalid limit, cursor or status.");
+    }
+    const webhook = await findOwn(c.req.param("id"), c.get("caller").serviceId);
+    if (!webhook) return apiError(c, 404, "not_found", "Webhook not found.");
+
+    const rows = await sql`
+      select id, click_id as event_id, status, attempts, next_attempt_at, last_status, last_error, created_at, delivered_at
+      from webhook_deliveries
+      where webhook_id = ${webhook.id}
+        and (${status}::text is null or status = ${status})
+        and (${cursor ?? null}::uuid is null or id < ${cursor ?? null}::uuid)
+      order by id desc
+      limit ${limit + 1}`;
+    const page = rows.slice(0, limit);
+    return c.json({ data: page, next_cursor: rows.length > limit ? encodeCursor(page.at(-1)!.id) : null });
   });
 
   app.post("/webhooks/:id/disable", async (c) => {
