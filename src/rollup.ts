@@ -56,3 +56,26 @@ export async function rollupRecent(sql: SQL, now = new Date()): Promise<void> {
   const yesterday = new Date(now.getTime() - 86_400_000).toISOString().slice(0, 10);
   await rollupDays(sql, yesterday, today);
 }
+
+const RAW_RETENTION_MONTHS = 13;
+
+// Drops monthly click partitions that ended before the start of the month 13 months back,
+// so at least 13 full months of raw clicks stay. This is the only path that removes raw
+// clicks (ADR-0001); rollups keep the counts. Returns the dropped partition names.
+export async function dropExpiredClicks(sql: SQL, now = new Date()): Promise<string[]> {
+  const cutoff = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - RAW_RETENTION_MONTHS, 1);
+  const rows = await sql`
+    select c.relname from pg_inherits i join pg_class c on c.oid = i.inhrelid
+    where i.inhparent = 'clicks'::regclass order by c.relname`;
+  const dropped: string[] = [];
+  for (const { relname } of rows as { relname: string }[]) {
+    const match = /^clicks_(\d{4})_(\d{2})$/.exec(relname);
+    if (!match) continue;
+    const end = Date.UTC(Number(match[1]), Number(match[2]), 1); // month index is 0-based: this is the next month
+    if (end > cutoff) continue;
+    await sql`drop table ${sql.unsafe(relname)}`;
+    console.log("dropped expired click partition", relname);
+    dropped.push(relname);
+  }
+  return dropped;
+}
