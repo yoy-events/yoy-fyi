@@ -207,3 +207,50 @@ describe("PATCH /v1/links/{id}", () => {
     expect((await patch("not-a-uuid", { title: "x" })).status).toBe(404);
   });
 });
+
+describe("POST /v1/links/{id}/disable", () => {
+  const disable = (id: string, key = token) => call("POST", `/v1/links/${id}/disable`, undefined, key);
+
+  test("disables the link, which then answers 410, and keeps its row", async () => {
+    const link = await create({ code: "bye" });
+
+    const res = await disable(link.id);
+
+    expect(res.status).toBe(200);
+    const disabled = await res.json();
+    expect(disabled.status).toBe("disabled");
+    expect(disabled.disabled_at).toBeTruthy();
+    expect((await app.request("https://yoy.fyi/bye")).status).toBe(410);
+    const [{ count }] = await sql`select count(*)::int as count from links`;
+    expect(count).toBe(1);
+  });
+
+  test("is idempotent", async () => {
+    const link = await create();
+    const first = await (await disable(link.id)).json();
+
+    const again = await disable(link.id);
+
+    expect(again.status).toBe(200);
+    expect((await again.json()).disabled_at).toBe(first.disabled_at);
+  });
+
+  test("the code stays taken after disabling", async () => {
+    const link = await create({ code: "keep" });
+    await disable(link.id);
+
+    const res = await call("POST", "/v1/links", { target_url: "https://example.com/", code: "keep" });
+
+    expect(res.status).toBe(409);
+  });
+
+  test("another service's link is 404 and links:write is required", async () => {
+    const { token: other } = await issueKey(sql, { serviceSlug: "diduny", name: "p", scopes: ["links:write"] });
+    const { token: readOnly } = await issueKey(sql, { serviceSlug: "yoy", name: "ro", scopes: ["links:read"] });
+    const link = await create();
+
+    expect((await disable(link.id, other)).status).toBe(404);
+    expect((await disable(link.id, readOnly)).status).toBe(403);
+    expect((await disable("nope")).status).toBe(404);
+  });
+});

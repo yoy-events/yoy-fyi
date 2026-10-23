@@ -316,6 +316,19 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
     return c.json(toLink(row as LinkRow, publicOrigin));
   });
 
+  app.post("/links/:id/disable", requireScope("links:write"), async (c) => {
+    const id = c.req.param("id");
+    const [row] = isUuid(id)
+      ? await sql`
+          update links set disabled_at = coalesce(disabled_at, now()),
+                           updated_at = case when disabled_at is null then now() else updated_at end
+          where id = ${id} and service_id = ${c.get("caller").serviceId}
+          returning *`
+      : [];
+    if (!row) return apiError(c, 404, "not_found", "Link not found.");
+    return c.json(toLink(row as LinkRow, publicOrigin));
+  });
+
   app.get("/links/:id", requireScope("links:read"), async (c) => {
     const id = c.req.param("id");
     const [row] = isUuid(id)
