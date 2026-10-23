@@ -1,7 +1,15 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { type AuthEnv, requireScope } from "./auth";
-import { apiError, isUuid, readJsonObject, validationFailed } from "./http";
+import {
+  apiError,
+  decodeCursor,
+  encodeCursor,
+  isUuid,
+  parseLimit,
+  readJsonObject,
+  validationFailed,
+} from "./http";
 import { randomBase62 } from "./keys";
 import { type RateLimit, createRateLimiter } from "./ratelimit";
 import { checkTarget } from "./target-policy";
@@ -235,6 +243,46 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
         if (attempt >= 4) throw err;
       }
     }
+  });
+
+  app.get("/links", requireScope("links:read"), async (c) => {
+    const q = c.req.query();
+    const limit = parseLimit(q.limit);
+    const cursor = decodeCursor(q.cursor);
+    const status = q.status ?? "all";
+    const bad =
+      limit === null ||
+      cursor === null ||
+      !["active", "expired", "disabled", "all"].includes(status) ||
+      (q.tag !== undefined && !TAG.test(q.tag)) ||
+      (q.code !== undefined && !CODE.test(q.code)) ||
+      [q.created_after, q.created_before].some((t) => t !== undefined && !RFC3339.test(t));
+    if (bad) return apiError(c, 400, "invalid_request", "Invalid query parameter.");
+
+    const rows: LinkRow[] = await sql`
+      select * from links
+      where service_id = ${c.get("caller").serviceId}
+        and (${q.tag ?? null}::text is null or tags @> array[${q.tag ?? null}::text])
+        and (${q.code ?? null}::text is null or code = ${q.code ?? null})
+        and (${q.ext_service ?? null}::text is null or ext_service = ${q.ext_service ?? null})
+        and (${q.ext_entity_type ?? null}::text is null or ext_entity_type = ${q.ext_entity_type ?? null})
+        and (${q.ext_entity_id ?? null}::text is null or ext_entity_id = ${q.ext_entity_id ?? null})
+        and (${q.created_after ?? null}::timestamptz is null or created_at >= ${q.created_after ?? null}::timestamptz)
+        and (${q.created_before ?? null}::timestamptz is null or created_at < ${q.created_before ?? null}::timestamptz)
+        and (${cursor ?? null}::uuid is null or id < ${cursor ?? null}::uuid)
+        and case ${status}
+          when 'disabled' then disabled_at is not null
+          when 'expired' then disabled_at is null and expires_at <= now()
+          when 'active' then disabled_at is null and (expires_at is null or expires_at > now())
+          else true
+        end
+      order by id desc
+      limit ${limit + 1}`;
+    const page = rows.slice(0, limit);
+    return c.json({
+      data: page.map((row) => toLink(row, publicOrigin)),
+      next_cursor: rows.length > limit ? encodeCursor(page.at(-1)!.id) : null,
+    });
   });
 
   app.get("/links/:id", requireScope("links:read"), async (c) => {
