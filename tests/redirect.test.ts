@@ -20,6 +20,15 @@ beforeEach(async () => {
 const get = (path: string, headers: Record<string, string> = {}) =>
   app.request(`https://yoy.fyi${path}`, { headers });
 
+describe("a.yoy.fyi", () => {
+  test("answers 301 to the same path and query on the public origin", async () => {
+    const res = await app.request("https://a.yoy.fyi/abc?utm_source=x");
+
+    expect(res.status).toBe(301);
+    expect(res.headers.get("location")).toBe("https://yoy.fyi/abc?utm_source=x");
+  });
+});
+
 describe("GET /{code}", () => {
   test("redirects an active link with 302 and no caching", async () => {
     await createLink(sql, serviceId, { code: "abc", target_url: "https://example.com/page" });

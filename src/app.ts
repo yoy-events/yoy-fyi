@@ -55,6 +55,13 @@ export function createApp({
   redirectLimit = { perMinute: 120, burst: 60 },
 }: AppDeps) {
   const app = new Hono<Env>();
+  // The old short host a.yoy.fyi keeps working by forwarding to the same path on PUBLIC_ORIGIN.
+  const legacyHost = `a.${new URL(publicOrigin).host}`;
+  app.use(async (c, next) => {
+    const url = new URL(c.req.url);
+    if (url.host === legacyHost) return c.redirect(publicOrigin + url.pathname + url.search, 301);
+    await next();
+  });
   const saltFor = createSaltSource(sql);
   const record = recordClick ?? ((click: Click) => insertClick(sql, click));
   const limitRedirect = createRateLimiter(redirectLimit);
