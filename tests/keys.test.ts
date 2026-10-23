@@ -33,7 +33,7 @@ describe("issueKey", () => {
     const { token, key } = await issueKey(sql, { serviceSlug: "yoy", name: "prod", scopes: ["links:read"] });
 
     expect(token).toMatch(/^yfi_[A-Za-z0-9]{8}_[A-Za-z0-9]{32}$/);
-    expect(token.startsWith(key.prefix + "_")).toBe(true);
+    expect(token.startsWith(`${key.prefix}_`)).toBe(true);
     const [service] = await sql`select slug from services`;
     expect(service.slug).toBe("yoy");
   });
@@ -64,7 +64,7 @@ describe("bearer auth", () => {
   test.each([
     ["missing", undefined],
     ["malformed", "not-a-key"],
-    ["unknown prefix", "yfi_AAAAAAAA_" + "a".repeat(32)],
+    ["unknown prefix", `yfi_AAAAAAAA_${"a".repeat(32)}`],
   ])("%s key returns 401 unauthorized", async (_, token) => {
     const res = await call("GET", "/v1/me", token);
 

@@ -1,5 +1,10 @@
+import { readFileSync } from "node:fs";
 import { type Page, expect, test } from "@playwright/test";
-import state from "./.state.json" with { type: "json" };
+
+// Written by tests/e2e/seed.ts before Playwright starts; gitignored, so read at run time.
+const state: { apiKey: string; loginToken: string; databaseUrl: string } = JSON.parse(
+  readFileSync(new URL("./.state.json", import.meta.url), "utf8"),
+);
 
 test.describe.configure({ mode: "serial" });
 
