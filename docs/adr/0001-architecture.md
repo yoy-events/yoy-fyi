@@ -1,6 +1,6 @@
 # ADR-0001: yoy.fyi architecture
 
-- Status: accepted (2026-10-23)
+- Status: accepted (2026-10-23); hosting, delivery, config location and client IP superseded by ADR-0002
 - Date: 2026-10-23
 - Decider: Roman
 
