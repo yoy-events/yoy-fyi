@@ -23,7 +23,7 @@ export function testDb(): Promise<SQL> {
 }
 
 export async function reset(sql: SQL): Promise<void> {
-  await sql`truncate clicks, links, api_keys, services, daily_salts`;
+  await sql`truncate clicks, links, api_keys, services, daily_salts, link_stats_hourly, link_stats_daily, link_dims_daily`;
 }
 
 export async function createService(sql: SQL, slug = "yoy"): Promise<string> {
@@ -47,4 +47,26 @@ export async function createLink(sql: SQL, serviceId: string, link: LinkInput): 
     values (${id}, ${serviceId}, ${link.code}, ${link.target_url}, ${link.utm_defaults ?? null},
             ${link.pass_click_id ?? false}, ${link.expires_at ?? null}, ${link.disabled_at ?? null})`;
   return id;
+}
+
+type ClickInput = {
+  link_id: string;
+  service_id: string;
+  clicked_at: string;
+  is_bot?: boolean;
+  visitor_hash?: string;
+  referer_host?: string;
+  country?: string;
+  ua_device?: string;
+  ua_browser?: string;
+  ua_os?: string;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+};
+
+// Inserts a raw click directly, creating its month's partition when needed.
+export async function addClick(sql: SQL, click: ClickInput): Promise<void> {
+  await sql`select create_click_partition(${click.clicked_at}::timestamptz)`;
+  await sql`insert into clicks ${sql({ id: Bun.randomUUIDv7(), is_bot: false, ...click })}`;
 }
