@@ -5,6 +5,7 @@ import { requireKey } from "./auth";
 import { type Click, describeUserAgent, insertClick, queryFields, refererHost } from "./click";
 import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
 import { keyRoutes } from "./keys";
+import { linkRoutes } from "./links";
 import { createSaltSource, visitorHash } from "./salt";
 import { buildTarget } from "./target";
 
@@ -15,6 +16,8 @@ export type AppDeps = {
   recordClick?: (click: Click) => Promise<void>;
   now?: () => Date;
   redirectLimit?: RateLimit;
+  resolveHost?: (host: string) => Promise<string[]>;
+  createLimit?: RateLimit;
 };
 
 // The server passes the socket address as `ip`. In production the app port is reachable only
@@ -37,6 +40,9 @@ const page = (title: string, body: string) =>
 
 export function createApp({
   sql,
+  publicOrigin,
+  resolveHost,
+  createLimit,
   countryOf,
   recordClick,
   now = () => new Date(),
@@ -61,6 +67,7 @@ export function createApp({
   const v1 = new Hono();
   v1.use(requireKey(sql));
   v1.route("/", keyRoutes(sql));
+  v1.route("/", linkRoutes({ sql, publicOrigin, resolveHost, createLimit }));
   app.route("/v1", v1);
 
   app.get("/:code", async (c) => {

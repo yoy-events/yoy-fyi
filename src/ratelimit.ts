@@ -28,7 +28,7 @@ export function createRateLimiter({ perMinute, burst, now = Date.now, maxKeys = 
     b.at = t;
   };
 
-  const take = (key: string): { ok: boolean; retryAfterSeconds: number } => {
+  const take = (key: string): { ok: boolean; retryAfterSeconds: number; remaining: number } => {
     const t = now();
     if (t - sweptAt >= 60_000) {
       for (const [k, b] of buckets) {
@@ -44,10 +44,12 @@ export function createRateLimiter({ perMinute, burst, now = Date.now, maxKeys = 
       buckets.set(key, bucket);
     }
     refill(bucket, t);
-    if (bucket.tokens < 1) return { ok: false, retryAfterSeconds: Math.ceil((1 - bucket.tokens) / perMs / 1000) };
+    if (bucket.tokens < 1) {
+      return { ok: false, retryAfterSeconds: Math.ceil((1 - bucket.tokens) / perMs / 1000), remaining: 0 };
+    }
     bucket.tokens -= 1;
-    return { ok: true, retryAfterSeconds: 0 };
+    return { ok: true, retryAfterSeconds: 0, remaining: Math.floor(bucket.tokens) };
   };
 
-  return Object.assign(take, { size: () => buckets.size });
+  return Object.assign(take, { size: () => buckets.size, burst });
 }
