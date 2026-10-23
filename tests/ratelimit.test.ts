@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createRateLimiter } from "../src/ratelimit";
+import { createRateLimiter, rateLimitKey } from "../src/ratelimit";
 
 test("allows a burst, then refills at the per-minute rate", () => {
   let t = 0;
@@ -31,4 +31,22 @@ test("forgets idle keys once their bucket is full again", () => {
   limit("b");
 
   expect(limit.size()).toBe(1);
+});
+
+test("never holds more than maxKeys buckets, evicting the oldest", () => {
+  const limit = createRateLimiter({ perMinute: 60, burst: 1, now: () => 0, maxKeys: 2 });
+  limit("a");
+  limit("b");
+  limit("c");
+
+  expect(limit.size()).toBe(2);
+  expect(limit("c").ok).toBe(false);
+});
+
+test("keys IPv6 clients by /64 and IPv4-mapped addresses as IPv4", () => {
+  expect(rateLimitKey("2001:db8:1:2:aaaa::1")).toBe(rateLimitKey("2001:db8:1:2:ffff:ffff:ffff:ffff"));
+  expect(rateLimitKey("2001:db8:1:2::1")).not.toBe(rateLimitKey("2001:db8:1:3::1"));
+  expect(rateLimitKey("2001:db8::1")).toBe(rateLimitKey("2001:0db8:0:0:9::"));
+  expect(rateLimitKey("::ffff:203.0.113.7")).toBe("203.0.113.7");
+  expect(rateLimitKey("203.0.113.7")).toBe("203.0.113.7");
 });

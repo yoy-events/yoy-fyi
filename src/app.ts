@@ -2,7 +2,7 @@ import type { SQL } from "bun";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { type Click, describeUserAgent, insertClick, queryFields, refererHost } from "./click";
-import { type RateLimit, createRateLimiter } from "./ratelimit";
+import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
 import { createSaltSource, visitorHash } from "./salt";
 import { buildTarget } from "./target";
 
@@ -15,7 +15,8 @@ export type AppDeps = {
   redirectLimit?: RateLimit;
 };
 
-// The server passes the socket address as `ip`; behind Fly, Fly-Client-IP is set by the proxy.
+// The server passes the socket address as `ip`. In production the app port is reachable only
+// through Fly's proxy, which overwrites Fly-Client-IP, so the header can be trusted there.
 type Env = { Bindings: { ip?: string } };
 
 const CODE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -68,7 +69,7 @@ export function createApp({
 
     const ip = c.req.header("fly-client-ip") ?? c.env?.ip ?? null;
     if (ip) {
-      const limit = limitRedirect(ip);
+      const limit = limitRedirect(rateLimitKey(ip));
       if (!limit.ok) {
         c.header("Retry-After", String(limit.retryAfterSeconds));
         return c.text("Too many requests", 429);
