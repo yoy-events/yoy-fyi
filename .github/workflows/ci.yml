@@ -12,8 +12,7 @@ permissions:
 
 jobs:
   check:
-    # Pinned: Playwright 1.64 installs its browser dependencies on 24.04; ubuntu-latest moved to 26.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
       postgres:
@@ -34,7 +33,8 @@ jobs:
       - run: bun run typecheck
       - run: bun run geoip:fetch
       - run: bun run test
-      - run: bunx playwright install --with-deps chromium
+      # The runner image already has Chrome's system libraries; --with-deps would apt-install fonts we don't need.
+      - run: bunx playwright install chromium
         timeout-minutes: 5
       - run: bun run test:e2e
         env:
