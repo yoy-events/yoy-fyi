@@ -9,6 +9,7 @@ import { keyRoutes } from "./keys";
 import { linkRoutes } from "./links";
 import { createSaltSource, visitorHash } from "./salt";
 import { buildTarget } from "./target";
+import { webhookRoutes } from "./webhooks";
 
 export type AppDeps = {
   sql: SQL;
@@ -19,6 +20,7 @@ export type AppDeps = {
   redirectLimit?: RateLimit;
   resolveHost?: (host: string) => Promise<string[]>;
   createLimit?: RateLimit;
+  webhookKey?: CryptoKey;
 };
 
 // The server passes the socket address as `ip`. In production the app port is reachable only
@@ -44,6 +46,7 @@ export function createApp({
   publicOrigin,
   resolveHost,
   createLimit,
+  webhookKey,
   countryOf,
   recordClick,
   now = () => new Date(),
@@ -69,6 +72,7 @@ export function createApp({
   v1.use(requireKey(sql));
   v1.route("/", keyRoutes(sql));
   v1.route("/", analyticsRoutes(sql));
+  v1.route("/", webhookRoutes({ sql, publicOrigin, webhookKey, resolveHost }));
   v1.route("/", linkRoutes({ sql, publicOrigin, resolveHost, createLimit }));
   app.route("/v1", v1);
 

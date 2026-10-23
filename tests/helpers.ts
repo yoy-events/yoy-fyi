@@ -23,7 +23,7 @@ export function testDb(): Promise<SQL> {
 }
 
 export async function reset(sql: SQL): Promise<void> {
-  await sql`truncate clicks, links, api_keys, services, daily_salts, link_stats_hourly, link_stats_daily, link_dims_daily`;
+  await sql`truncate clicks, links, api_keys, services, daily_salts, link_stats_hourly, link_stats_daily, link_dims_daily, webhook_deliveries, webhooks`;
 }
 
 export async function createService(sql: SQL, slug = "yoy"): Promise<string> {
@@ -70,3 +70,6 @@ export async function addClick(sql: SQL, click: ClickInput): Promise<void> {
   await sql`select create_click_partition(${click.clicked_at}::timestamptz)`;
   await sql`insert into clicks ${sql({ id: Bun.randomUUIDv7(), is_bot: false, ...click })}`;
 }
+
+// A fresh AES-256 key for webhook secrets, base64 like WEBHOOK_ENC_KEY.
+export const testWebhookKey = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64");
