@@ -20,16 +20,6 @@ const CODE = /^[A-Za-z0-9_-]{1,64}$/;
 const TAG = /^[a-z0-9][a-z0-9_:.-]{0,39}$/;
 const UTM_KEYS = new Set(["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]);
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
-const CREATE_FIELDS = new Set([
-  "target_url",
-  "code",
-  "title",
-  "tags",
-  "utm_defaults",
-  "pass_click_id",
-  "expires_at",
-  "external_ref",
-]);
 
 type LinkRow = {
   id: string;
@@ -62,53 +52,67 @@ export type LinkInput = {
 const isString = (v: unknown, min: number, max: number): v is string =>
   typeof v === "string" && v.length >= min && v.length <= max;
 
-export function validateLinkCreate(body: Record<string, unknown>, now: Date): Record<string, string> {
-  const fields: Record<string, string> = {};
-  for (const key of Object.keys(body)) if (!CREATE_FIELDS.has(key)) fields[key] = "unknown field";
+type Check = { ok: (v: unknown, now: Date) => boolean; rule: string; nullable?: boolean };
 
-  if (!isString(body.target_url, 1, 2048)) fields.target_url = "required URL string, at most 2048 characters";
-  if (body.code !== undefined && !(typeof body.code === "string" && CODE.test(body.code))) {
-    fields.code = "1-64 characters of A-Z a-z 0-9 _ -";
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === "object" && !Array.isArray(v);
+
+const FIELDS: Record<string, Check> = {
+  target_url: { ok: (v) => isString(v, 1, 2048), rule: "URL string, at most 2048 characters" },
+  code: { ok: (v) => typeof v === "string" && CODE.test(v), rule: "1-64 characters of A-Z a-z 0-9 _ -" },
+  title: { ok: (v) => isString(v, 0, 200), rule: "string, at most 200 characters", nullable: true },
+  tags: {
+    ok: (v) =>
+      Array.isArray(v) &&
+      v.length <= 20 &&
+      new Set(v).size === v.length &&
+      v.every((t) => typeof t === "string" && TAG.test(t)),
+    rule: "up to 20 unique tags matching ^[a-z0-9][a-z0-9_:.-]{0,39}$",
+  },
+  utm_defaults: {
+    ok: (v) => isPlainObject(v) && Object.entries(v).every(([k, x]) => UTM_KEYS.has(k) && isString(x, 1, 200)),
+    rule: "object of utm_source, utm_medium, utm_campaign, utm_term, utm_content strings",
+    nullable: true,
+  },
+  pass_click_id: { ok: (v) => typeof v === "boolean", rule: "boolean" },
+  expires_at: {
+    ok: (v, now) => typeof v === "string" && RFC3339.test(v) && Date.parse(v) > now.getTime(),
+    rule: "RFC 3339 date-time in the future",
+    nullable: true,
+  },
+  external_ref: {
+    ok: (v) =>
+      isPlainObject(v) &&
+      Object.keys(v).length === 3 &&
+      isString(v.service, 1, 64) &&
+      isString(v.entity_type, 1, 64) &&
+      isString(v.entity_id, 1, 128),
+    rule: "object with service, entity_type, entity_id",
+  },
+};
+
+const UPDATABLE = new Set(["target_url", "title", "tags", "utm_defaults", "pass_click_id", "expires_at"]);
+
+function checkFields(body: Record<string, unknown>, allowNull: boolean, now: Date): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const [key, value] of Object.entries(body)) {
+    const check = FIELDS[key];
+    if (!check) fields[key] = "unknown field";
+    else if (value === null ? !(allowNull && check.nullable) : !check.ok(value, now)) fields[key] = check.rule;
   }
-  if (body.title !== undefined && !isString(body.title, 0, 200)) fields.title = "string, at most 200 characters";
-  const tags = body.tags;
-  if (
-    tags !== undefined &&
-    !(Array.isArray(tags) && tags.length <= 20 && new Set(tags).size === tags.length && tags.every((t) => typeof t === "string" && TAG.test(t)))
-  ) {
-    fields.tags = "up to 20 unique tags matching ^[a-z0-9][a-z0-9_:.-]{0,39}$";
-  }
-  const utm = body.utm_defaults;
-  if (
-    utm !== undefined &&
-    !(
-      utm &&
-      typeof utm === "object" &&
-      !Array.isArray(utm) &&
-      Object.entries(utm).every(([k, v]) => UTM_KEYS.has(k) && isString(v, 1, 200))
-    )
-  ) {
-    fields.utm_defaults = "object of utm_source, utm_medium, utm_campaign, utm_term, utm_content strings";
-  }
-  if (body.pass_click_id !== undefined && typeof body.pass_click_id !== "boolean") fields.pass_click_id = "boolean";
-  if (body.expires_at !== undefined) {
-    const ok = typeof body.expires_at === "string" && RFC3339.test(body.expires_at) && Date.parse(body.expires_at) > now.getTime();
-    if (!ok) fields.expires_at = "RFC 3339 date-time in the future";
-  }
-  const ref = body.external_ref as Record<string, unknown> | undefined;
-  if (
-    ref !== undefined &&
-    !(
-      ref &&
-      typeof ref === "object" &&
-      Object.keys(ref).length === 3 &&
-      isString(ref.service, 1, 64) &&
-      isString(ref.entity_type, 1, 64) &&
-      isString(ref.entity_id, 1, 128)
-    )
-  ) {
-    fields.external_ref = "object with service, entity_type, entity_id";
-  }
+  return fields;
+}
+
+export function validateLinkCreate(body: Record<string, unknown>, now: Date): Record<string, string> {
+  const fields = checkFields(body, false, now);
+  if (body.target_url === undefined) fields.target_url = `required ${FIELDS.target_url!.rule}`;
+  return fields;
+}
+
+export function validateLinkUpdate(body: Record<string, unknown>, now: Date): Record<string, string> {
+  const fields = checkFields(body, true, now);
+  for (const key of Object.keys(body)) if (FIELDS[key] && !UPDATABLE.has(key)) fields[key] = "cannot change";
+  if (Object.keys(body).length === 0) fields.body = "at least one field to change";
   return fields;
 }
 
@@ -283,6 +287,33 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
       data: page.map((row) => toLink(row, publicOrigin)),
       next_cursor: rows.length > limit ? encodeCursor(page.at(-1)!.id) : null,
     });
+  });
+
+  app.patch("/links/:id", requireScope("links:write"), async (c) => {
+    const id = c.req.param("id");
+    if (!isUuid(id)) return apiError(c, 404, "not_found", "Link not found.");
+    const body = await readJsonObject(c);
+    if (!body) return apiError(c, 400, "invalid_request", "Body must be a JSON object.");
+    const fields = validateLinkUpdate(body, new Date());
+    if (Object.keys(fields).length) return validationFailed(c, fields);
+
+    const serviceId = c.get("caller").serviceId;
+    const [link] = await sql`select disabled_at from links where id = ${id} and service_id = ${serviceId}`;
+    if (!link) return apiError(c, 404, "not_found", "Link not found.");
+    if (link.disabled_at) return apiError(c, 409, "link_disabled", "A disabled link cannot be changed.");
+    if (typeof body.target_url === "string") {
+      const rejection = await checkTarget(body.target_url, { ownHost, resolve: resolveHost });
+      if (rejection) return apiError(c, 422, "target_rejected", "The target URL is not allowed.", { reason: rejection });
+    }
+
+    const changes = { ...body, updated_at: new Date() } as Record<string, unknown>;
+    if (Array.isArray(body.tags)) changes.tags = sql.array(body.tags, "text");
+    const [row] = await sql`
+      update links set ${sql(changes)}
+      where id = ${id} and service_id = ${serviceId} and disabled_at is null
+      returning *`;
+    if (!row) return apiError(c, 409, "link_disabled", "A disabled link cannot be changed.");
+    return c.json(toLink(row as LinkRow, publicOrigin));
   });
 
   app.get("/links/:id", requireScope("links:read"), async (c) => {
