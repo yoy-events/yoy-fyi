@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: yoy_fyi
+    ports:
+      # Loopback only: this dev database has intentionally simple local credentials.
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - yoy-fyi-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d yoy_fyi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  yoy-fyi-db-data:
