@@ -8,7 +8,7 @@ export type TargetRejection =
   | "own_host"
   | "private_address"
   | "unresolvable"
-  | "port";
+  | "port"; // webhooks only, see webhookUrlRejection
 
 type Options = { ownHost: string; resolve?: (host: string) => Promise<string[]> };
 
@@ -50,41 +50,31 @@ const PRIVATE_NAMES = /(^|\.)(localhost|internal|local)$/;
 
 const resolveAll = async (host: string) => (await lookup(host, { all: true })).map((a) => a.address);
 
-// Resolves a target and checks it. Returns the addresses it checked, so a server-side request
-// can connect to exactly those (src/outbox.ts pins them), or the reason it is unacceptable.
-export async function resolveTarget(
-  raw: string,
-  { ownHost, resolve = resolveAll }: Options,
-): Promise<{ rejection: TargetRejection } | { addresses: string[] }> {
+// Returns why a target is unacceptable, or null when it is fine. DNS can change after this
+// check: for links that is fine because the browser follows the redirect; for webhooks see
+// postWebhook in src/outbox.ts.
+export async function checkTarget(raw: string, { ownHost, resolve = resolveAll }: Options): Promise<TargetRejection | null> {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    return { rejection: "scheme" };
+    return "scheme";
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return { rejection: "scheme" };
-  if (url.username || url.password) return { rejection: "credentials" };
-  if (raw.length > 2048) return { rejection: "too_long" };
+  if (url.protocol !== "http:" && url.protocol !== "https:") return "scheme";
+  if (url.username || url.password) return "credentials";
+  if (raw.length > 2048) return "too_long";
 
   const host = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
-  if (host === ownHost || host.endsWith(`.${ownHost}`)) return { rejection: "own_host" };
-  if (isIP(host)) return isBlocked(host) ? { rejection: "private_address" } : { addresses: [host] };
-  if (PRIVATE_NAMES.test(host)) return { rejection: "private_address" };
+  if (host === ownHost || host.endsWith(`.${ownHost}`)) return "own_host";
+  if (isIP(host)) return isBlocked(host) ? "private_address" : null;
+  if (PRIVATE_NAMES.test(host)) return "private_address";
 
   let addresses: string[];
   try {
     addresses = await resolve(host);
   } catch {
-    return { rejection: "unresolvable" };
+    return "unresolvable";
   }
-  if (addresses.length === 0) return { rejection: "unresolvable" };
-  return addresses.some(isBlocked) ? { rejection: "private_address" } : { addresses };
-}
-
-// Returns why a link target is unacceptable, or null when it is fine. For link targets, DNS
-// changing later is accepted: the browser follows the redirect, not this server. Server-side
-// requests must use resolveTarget and pin the connection instead.
-export async function checkTarget(raw: string, options: Options): Promise<TargetRejection | null> {
-  const result = await resolveTarget(raw, options);
-  return "rejection" in result ? result.rejection : null;
+  if (addresses.length === 0) return "unresolvable";
+  return addresses.some(isBlocked) ? "private_address" : null;
 }

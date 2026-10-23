@@ -140,11 +140,11 @@ describe("fanOut", () => {
 
 describe("deliverDue", () => {
   const NOW = new Date("2026-04-01T12:00:00Z");
-  type Sent = { url: string; body: string; headers: Record<string, string>; address: string };
+  type Sent = { url: string; body: string; headers: Record<string, string> };
   let sent: Sent[];
   let respond: (s: Sent) => Promise<number>;
-  const fakePost = async (url: string, req: { body: string; headers: Record<string, string> }, address: string) => {
-    const s = { url, ...req, address };
+  const fakePost = async (url: string, req: { body: string; headers: Record<string, string> }) => {
+    const s = { url, ...req };
     sent.push(s);
     return respond(s);
   };
@@ -182,10 +182,9 @@ describe("deliverDue", () => {
     expect(await run()).toBe(1);
 
     expect(sent).toHaveLength(1);
-    const { url, body, address } = sent[0]!;
+    const { url, body } = sent[0]!;
     const headers = new Headers(sent[0]!.headers);
     expect(url).toBe("https://hooks.example.com/");
-    expect(address).toBe("93.184.215.14");
     expect(JSON.parse(body)).toEqual({ id: "evt", type: "link.clicked" });
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("yoy-event")).toBe("link.clicked");

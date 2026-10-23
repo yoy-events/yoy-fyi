@@ -1,9 +1,7 @@
 import type { SQL } from "bun";
 import { openSecret } from "./secretbox";
 import { webhookUrlRejection } from "./webhooks";
-import http from "node:http";
-import https from "node:https";
-import { resolveTarget } from "./target-policy";
+import { checkTarget } from "./target-policy";
 
 const BATCH = 500;
 const SETTLE_MS = 5_000;
@@ -127,43 +125,28 @@ const MAX_ATTEMPTS = 14;
 
 type PostRequest = { body: string; headers: Record<string, string> };
 
-// POSTs to `url` but connects to `address`, an IP that already passed the target policy, so
-// DNS cannot change between the check and the connection. TLS SNI and Host stay the hostname.
-// Redirects are never followed. Resolves to the response status.
-export function postPinned(url: string, req: PostRequest, address: string, timeoutMs = TIMEOUT_MS): Promise<number> {
-  const client = url.startsWith("https:") ? https : http;
-  const family = address.includes(":") ? 6 : 4;
-  return new Promise((resolve, reject) => {
-    const request = client.request(
-      url,
-      {
-        method: "POST",
-        headers: { ...req.headers, "Content-Length": String(Buffer.byteLength(req.body)) },
-        timeout: timeoutMs,
-        lookup: (_host, options, callback) =>
-          (options as { all?: boolean }).all
-            ? (callback as (e: null, a: { address: string; family: number }[]) => void)(null, [{ address, family }])
-            : callback(null, address, family),
-      },
-      (res) => {
-        res.resume();
-        resolve(res.statusCode ?? 0);
-      },
-    );
-    // Reject with our own error: Bun reports a destroyed request as a connection error.
-    request.on("timeout", () => {
-      reject(new Error(`timed out after ${timeoutMs} ms`));
-      request.destroy();
-    });
-    request.on("error", reject);
-    request.end(req.body);
+// POSTs a webhook without following redirects. TLS is verified against the URL's hostname
+// before anything is sent. The host was re-checked just before (deliverDue), but DNS could
+// still change in between: Bun cannot pin the checked IP and verify the hostname first (its
+// IP-URL requests skip the name check, and checkServerIdentity runs after the request is
+// written). Webhook URLs are limited to https on 443, and nothing internal listens on 443,
+// so a rebinding attempt by an authenticated service reaches nothing. Resolves to the status.
+export async function postWebhook(url: string, req: PostRequest, timeoutMs = TIMEOUT_MS): Promise<number> {
+  const res = await fetch(url, {
+    method: "POST",
+    body: req.body,
+    headers: req.headers,
+    redirect: "manual",
+    signal: AbortSignal.timeout(timeoutMs),
   });
+  await res.body?.cancel();
+  return res.status;
 }
 
 type DeliverDeps = {
   key: CryptoKey;
   ownHost: string;
-  post?: (url: string, req: PostRequest, address: string) => Promise<number>;
+  post?: (url: string, req: PostRequest) => Promise<number>;
   resolveHost?: (host: string) => Promise<string[]>;
   now?: () => Date;
   random?: () => number;
@@ -177,7 +160,7 @@ export function sign(secret: string, timestamp: number, body: string): string {
 // Claims due deliveries with a one-minute lease (so a crash only delays them), POSTs each,
 // and records the outcome. Returns how many deliveries were attempted.
 export async function deliverDue(sql: SQL, deps: DeliverDeps): Promise<number> {
-  const { key, ownHost, post = postPinned, resolveHost, now = () => new Date(), random = Math.random } = deps;
+  const { key, ownHost, post = postWebhook, resolveHost, now = () => new Date(), random = Math.random } = deps;
   const at = now();
   const claimed: { id: string; payload: unknown; attempts: number; url: string; secret_enc: string }[] = await sql`
     with due as (
@@ -197,27 +180,21 @@ export async function deliverDue(sql: SQL, deps: DeliverDeps): Promise<number> {
       let status: number | null = null;
       let error: string | null = null;
       // Re-checked on every attempt: the host may resolve somewhere else than at registration.
-      const target = webhookUrlRejection(d.url)
-        ? { rejection: webhookUrlRejection(d.url)! }
-        : await resolveTarget(d.url, { ownHost, resolve: resolveHost });
-      if ("rejection" in target) {
-        error = `target_rejected: ${target.rejection}`;
+      const rejection = webhookUrlRejection(d.url) ?? (await checkTarget(d.url, { ownHost, resolve: resolveHost }));
+      if (rejection) {
+        error = `target_rejected: ${rejection}`;
       } else {
         const body = JSON.stringify(d.payload);
         try {
-          status = await post(
-            d.url,
-            {
-              body,
-              headers: {
-                "Content-Type": "application/json",
-                "Yoy-Event": "link.clicked",
-                "Yoy-Delivery": d.id,
-                "Yoy-Signature": sign(await openSecret(key, d.secret_enc), Math.floor(at.getTime() / 1000), body),
-              },
+          status = await post(d.url, {
+            body,
+            headers: {
+              "Content-Type": "application/json",
+              "Yoy-Event": "link.clicked",
+              "Yoy-Delivery": d.id,
+              "Yoy-Signature": sign(await openSecret(key, d.secret_enc), Math.floor(at.getTime() / 1000), body),
             },
-            target.addresses[0]!,
-          );
+          });
           if (status < 200 || status >= 300) error = `HTTP ${status}`;
         } catch (err) {
           error = (err instanceof Error ? err.message : String(err)).slice(0, 300);

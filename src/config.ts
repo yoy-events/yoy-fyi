@@ -10,5 +10,7 @@ export function loadConfig(env = process.env) {
     databaseUrl: required("DATABASE_URL"),
     geoipDbPath: env.GEOIP_DB_PATH ?? "data/dbip-country-lite.mmdb",
     port: Number(env.PORT ?? 3000),
+    // Fly secret: 32 random bytes, base64. Encrypts webhook signing secrets at rest.
+    webhookEncKey: required("WEBHOOK_ENC_KEY"),
   };
 }
