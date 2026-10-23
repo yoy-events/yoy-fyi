@@ -22,7 +22,7 @@ const TAG = /^[a-z0-9][a-z0-9_:.-]{0,39}$/;
 const UTM_KEYS = new Set(["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]);
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
-type LinkRow = {
+export type LinkRow = {
   id: string;
   code: string;
   target_url: string;
@@ -156,6 +156,104 @@ const canonical = (v: unknown): string =>
       : JSON.stringify(v);
 const bodyHash = (body: unknown) => new Bun.CryptoHasher("sha256").update(canonical(body)).digest("hex");
 
+type CreateResult =
+  | { kind: "created" | "existing"; row: LinkRow }
+  | {
+      kind: "error";
+      status: 409 | 422;
+      code: "validation_failed" | "idempotency_key_reused" | "code_reserved" | "target_rejected" | "code_taken";
+      message: string;
+      details?: Record<string, unknown>;
+    };
+
+// An earlier create that this request must replay: same Idempotency-Key, or same external_ref.
+async function findExisting(sql: SQL, serviceId: string, key: string | null, hash: string, ref: LinkInput["external_ref"]) {
+  if (key) {
+    const [row] = await sql`select * from links where service_id = ${serviceId} and idempotency_key = ${key}`;
+    if (row) return row.idempotency_hash === hash ? { link: row as LinkRow } : { reused: true as const };
+  }
+  if (ref) {
+    const [row] = await sql`
+      select * from links where service_id = ${serviceId}
+        and ext_service = ${ref.service} and ext_entity_type = ${ref.entity_type} and ext_entity_id = ${ref.entity_id}`;
+    if (row) return { link: row as LinkRow };
+  }
+  return null;
+}
+
+// Creates a link for a service with every rule the API applies: validation, idempotency,
+// reserved codes, the target policy and code generation. Shared by /v1 and the admin UI.
+export async function createLink(
+  sql: SQL,
+  { ownHost, resolveHost }: { ownHost: string; resolveHost?: (host: string) => Promise<string[]> },
+  serviceId: string,
+  body: Record<string, unknown>,
+  idempotencyKey: string | null = null,
+): Promise<CreateResult> {
+  const fields = validateLinkCreate(body, new Date());
+  if (Object.keys(fields).length) {
+    return { kind: "error", status: 422, code: "validation_failed", message: "Request body failed validation.", details: { fields } };
+  }
+  const input = body as LinkInput;
+  const hash = bodyHash(body);
+
+  const replay = async (): Promise<CreateResult | null> => {
+    const existing = await findExisting(sql, serviceId, idempotencyKey, hash, input.external_ref);
+    if (!existing) return null;
+    if ("reused" in existing) {
+      return {
+        kind: "error",
+        status: 422,
+        code: "idempotency_key_reused",
+        message: "This Idempotency-Key was used with a different body.",
+      };
+    }
+    return { kind: "existing", row: existing.link };
+  };
+  const replayed = await replay();
+  if (replayed) return replayed;
+
+  if (input.code && RESERVED.has(input.code.toLowerCase())) {
+    return { kind: "error", status: 422, code: "code_reserved", message: `"${input.code}" is a reserved path.` };
+  }
+  const rejection = await checkTarget(input.target_url, { ownHost, resolve: resolveHost });
+  if (rejection) {
+    return {
+      kind: "error",
+      status: 422,
+      code: "target_rejected",
+      message: "The target URL is not allowed.",
+      details: { reason: rejection },
+    };
+  }
+
+  for (let attempt = 0; ; attempt++) {
+    const code = input.code ?? randomBase62(7);
+    try {
+      const [row]: LinkRow[] = await sql`
+        insert into links (id, service_id, code, target_url, title, tags, utm_defaults, pass_click_id,
+                           expires_at, ext_service, ext_entity_type, ext_entity_id, idempotency_key, idempotency_hash)
+        values (${Bun.randomUUIDv7()}, ${serviceId}, ${code}, ${input.target_url}, ${input.title ?? null},
+                ${sql.array(input.tags ?? [], "text")}, ${input.utm_defaults ?? null}, ${input.pass_click_id ?? false},
+                ${input.expires_at ?? null}, ${input.external_ref?.service ?? null},
+                ${input.external_ref?.entity_type ?? null}, ${input.external_ref?.entity_id ?? null},
+                ${idempotencyKey}, ${idempotencyKey ? hash : null})
+        returning *`;
+      return { kind: "created", row: row! };
+    } catch (err) {
+      const constraint = uniqueViolation(err);
+      // A concurrent create with the same key or external_ref won the race: replay it.
+      if (constraint === "links_idempotency_key_idx" || constraint === "links_external_ref_idx") {
+        const replayedAfterRace = await replay();
+        if (replayedAfterRace) return replayedAfterRace;
+      }
+      if (constraint !== "links_code_key") throw err;
+      if (input.code) return { kind: "error", status: 409, code: "code_taken", message: `The code "${input.code}" is already in use.` };
+      if (attempt >= 4) throw err;
+    }
+  }
+}
+
 type Deps = {
   sql: SQL;
   publicOrigin: string;
@@ -167,21 +265,6 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
   const app = new Hono<AuthEnv>();
   const ownHost = new URL(publicOrigin).hostname;
   const limitCreate = createRateLimiter(createLimit);
-
-  // An earlier create this request must replay: same Idempotency-Key, or same external_ref.
-  const findExisting = async (serviceId: string, key: string | null, hash: string, ref: LinkInput["external_ref"]) => {
-    if (key) {
-      const [row] = await sql`select * from links where service_id = ${serviceId} and idempotency_key = ${key}`;
-      if (row) return row.idempotency_hash === hash ? { link: row as LinkRow } : { reused: true as const };
-    }
-    if (ref) {
-      const [row] = await sql`
-        select * from links where service_id = ${serviceId}
-          and ext_service = ${ref.service} and ext_entity_type = ${ref.entity_type} and ext_entity_id = ${ref.entity_id}`;
-      if (row) return { link: row as LinkRow };
-    }
-    return null;
-  };
 
   app.post("/links", requireScope("links:write"), async (c) => {
     const caller = c.get("caller");
@@ -199,55 +282,10 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
     }
     const body = await readJsonObject(c);
     if (!body) return apiError(c, 400, "invalid_request", "Body must be a JSON object.");
-    const fields = validateLinkCreate(body, new Date());
-    if (Object.keys(fields).length) return validationFailed(c, fields);
-    const input = body as LinkInput;
-    const hash = bodyHash(body);
-
-    const replay = async () => {
-      const existing = await findExisting(caller.serviceId, idempotencyKey, hash, input.external_ref);
-      if (!existing) return null;
-      if ("reused" in existing) {
-        return apiError(c, 422, "idempotency_key_reused", "This Idempotency-Key was used with a different body.");
-      }
-      return c.json(toLink(existing.link, publicOrigin), 200);
-    };
-    const replayed = await replay();
-    if (replayed) return replayed;
-
-    if (input.code && RESERVED.has(input.code.toLowerCase())) {
-      return apiError(c, 422, "code_reserved", `"${input.code}" is a reserved path.`);
-    }
-    const rejection = await checkTarget(input.target_url, { ownHost, resolve: resolveHost });
-    if (rejection) return apiError(c, 422, "target_rejected", "The target URL is not allowed.", { reason: rejection });
-
-    const serviceId = caller.serviceId;
-    for (let attempt = 0; ; attempt++) {
-      const code = input.code ?? randomBase62(7);
-      try {
-        const [row]: LinkRow[] = await sql`
-          insert into links (id, service_id, code, target_url, title, tags, utm_defaults, pass_click_id,
-                             expires_at, ext_service, ext_entity_type, ext_entity_id, idempotency_key, idempotency_hash)
-          values (${Bun.randomUUIDv7()}, ${serviceId}, ${code}, ${input.target_url}, ${input.title ?? null},
-                  ${sql.array(input.tags ?? [], "text")}, ${input.utm_defaults ?? null}, ${input.pass_click_id ?? false},
-                  ${input.expires_at ?? null}, ${input.external_ref?.service ?? null},
-                  ${input.external_ref?.entity_type ?? null}, ${input.external_ref?.entity_id ?? null},
-                  ${idempotencyKey}, ${idempotencyKey ? hash : null})
-          returning *`;
-        c.header("Location", `/v1/links/${row!.id}`);
-        return c.json(toLink(row!, publicOrigin), 201);
-      } catch (err) {
-        const constraint = uniqueViolation(err);
-        // A concurrent create with the same key or external_ref won the race: replay it.
-        if (constraint === "links_idempotency_key_idx" || constraint === "links_external_ref_idx") {
-          const replayedAfterRace = await replay();
-          if (replayedAfterRace) return replayedAfterRace;
-        }
-        if (constraint !== "links_code_key") throw err;
-        if (input.code) return apiError(c, 409, "code_taken", `The code "${input.code}" is already in use.`);
-        if (attempt >= 4) throw err;
-      }
-    }
+    const result = await createLink(sql, { ownHost, resolveHost }, caller.serviceId, body, idempotencyKey);
+    if (result.kind === "error") return apiError(c, result.status, result.code, result.message, result.details);
+    if (result.kind === "created") c.header("Location", `/v1/links/${result.row.id}`);
+    return c.json(toLink(result.row, publicOrigin), result.kind === "created" ? 201 : 200);
   });
 
   app.get("/links", requireScope("links:read"), async (c) => {
