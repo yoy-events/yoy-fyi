@@ -17,5 +17,5 @@ test("returns null for private, unparseable or empty input", () => {
 });
 
 test("refuses to start without the database file", async () => {
-  expect(loadCountryLookup("data/missing.mmdb")).rejects.toThrow("data/missing.mmdb");
+  await expect(loadCountryLookup("data/missing.mmdb")).rejects.toThrow("data/missing.mmdb");
 });

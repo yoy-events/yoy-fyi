@@ -440,8 +440,9 @@ paths:
       operationId: createWebhook
       summary: Register a webhook
       description: |
-        Requires `webhooks:manage`. The URL gets the same checks as link targets (https only
-        here, no private or own hosts). `secret` is returned only in this response. To rotate,
+        Requires `webhooks:manage`. The URL gets the same checks as link targets, plus: https on
+        the default port (443) only. Each delivery re-resolves the host, re-checks it, and
+        connects to the checked address. `secret` is returned only in this response. To rotate,
         create a new webhook and disable the old one.
       requestBody:
         required: true
@@ -713,7 +714,7 @@ components:
               description: |
                 Machine-readable context. For `validation_failed`: `{ fields: { <path>: <reason> } }`.
                 For `target_rejected`: `{ reason: scheme | credentials | private_address |
-                own_host | unresolvable | too_long }`.
+                own_host | unresolvable | too_long | port }` (`port` applies to webhooks only).
               additionalProperties: true
 
     Code:

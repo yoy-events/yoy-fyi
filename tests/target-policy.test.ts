@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkTarget } from "../src/target-policy";
+import { checkTarget, resolveTarget } from "../src/target-policy";
 
 const publicDns = async () => ["93.184.215.14"];
 const check = (url: string, resolve = publicDns) => checkTarget(url, { ownHost: "yoy.fyi", resolve });
@@ -77,5 +77,22 @@ describe("checkTarget", () => {
       throw new Error("ENOTFOUND");
     };
     expect(await check("https://no-such-host.example/", fail)).toBe("unresolvable");
+  });
+});
+
+describe("resolveTarget", () => {
+  test("returns the addresses it checked, for pinning the connection", async () => {
+    expect(await resolveTarget("https://example.com/", { ownHost: "yoy.fyi", resolve: publicDns })).toEqual({
+      addresses: ["93.184.215.14"],
+    });
+    expect(await resolveTarget("http://93.184.215.14/", { ownHost: "yoy.fyi", resolve: publicDns })).toEqual({
+      addresses: ["93.184.215.14"],
+    });
+  });
+
+  test("returns the rejection otherwise", async () => {
+    expect(await resolveTarget("http://10.0.0.1/", { ownHost: "yoy.fyi", resolve: publicDns })).toEqual({
+      rejection: "private_address",
+    });
   });
 });

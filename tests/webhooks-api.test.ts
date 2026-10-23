@@ -57,7 +57,7 @@ describe("webhook registration", () => {
     const [row] = await sql`select secret_enc from webhooks`;
     expect(row.secret_enc).not.toContain(secret);
     expect(await openSecret(await loadSecretKey(keyBase64), row.secret_enc)).toBe(secret);
-    expect(openSecret(await loadSecretKey(testWebhookKey()), row.secret_enc)).rejects.toThrow();
+    await expect(openSecret(await loadSecretKey(testWebhookKey()), row.secret_enc)).rejects.toThrow();
   });
 
   test("honours include_bots", async () => {
@@ -72,6 +72,7 @@ describe("webhook registration", () => {
     ["http://hooks.example.com/", "scheme"],
     ["https://yoy.fyi/hook", "own_host"],
     ["https://10.0.0.1/hook", "private_address"],
+    ["https://hooks.example.com:8443/hook", "port"],
   ])("rejects %s (%s)", async (url, reason) => {
     const res = await call("POST", "/v1/webhooks", { url });
 

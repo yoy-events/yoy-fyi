@@ -140,20 +140,20 @@ describe("fanOut", () => {
 
 describe("deliverDue", () => {
   const NOW = new Date("2026-04-01T12:00:00Z");
-  type Sent = { url: string; init: RequestInit };
+  type Sent = { url: string; body: string; headers: Record<string, string>; address: string };
   let sent: Sent[];
-  let respond: (s: Sent) => Promise<Response>;
-  const fakeFetch = (async (url: string, init: RequestInit) => {
-    const s = { url, init };
+  let respond: (s: Sent) => Promise<number>;
+  const fakePost = async (url: string, req: { body: string; headers: Record<string, string> }, address: string) => {
+    const s = { url, ...req, address };
     sent.push(s);
     return respond(s);
-  }) as unknown as typeof fetch;
+  };
 
   const run = (overrides: Partial<Parameters<typeof deliverDue>[1]> = {}) =>
     deliverDue(sql, {
       key,
       ownHost: "yoy.fyi",
-      fetch: fakeFetch,
+      post: fakePost,
       resolveHost: async () => ["93.184.215.14"],
       now: () => NOW,
       random: () => 0.5,
@@ -173,7 +173,7 @@ describe("deliverDue", () => {
 
   beforeEach(() => {
     sent = [];
-    respond = async () => new Response("ok", { status: 200 });
+    respond = async () => 200;
   });
 
   test("POSTs the signed payload and marks the delivery delivered", async () => {
@@ -182,12 +182,10 @@ describe("deliverDue", () => {
     expect(await run()).toBe(1);
 
     expect(sent).toHaveLength(1);
-    const { url, init } = sent[0]!;
-    const headers = new Headers(init.headers);
-    const body = init.body as string;
+    const { url, body, address } = sent[0]!;
+    const headers = new Headers(sent[0]!.headers);
     expect(url).toBe("https://hooks.example.com/");
-    expect(init.method).toBe("POST");
-    expect(init.redirect).toBe("manual");
+    expect(address).toBe("93.184.215.14");
     expect(JSON.parse(body)).toEqual({ id: "evt", type: "link.clicked" });
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("yoy-event")).toBe("link.clicked");
@@ -205,7 +203,7 @@ describe("deliverDue", () => {
   });
 
   test("a non-2xx answer is retried after a backoff", async () => {
-    respond = async () => new Response("no", { status: 500 });
+    respond = async () => 500;
     const id = await pending(2);
 
     await run();
@@ -220,7 +218,7 @@ describe("deliverDue", () => {
   });
 
   test("redirects are not followed and count as failures", async () => {
-    respond = async () => new Response(null, { status: 302, headers: { location: "http://10.0.0.1/" } });
+    respond = async () => 302;
     const id = await pending();
 
     await run();
@@ -241,7 +239,7 @@ describe("deliverDue", () => {
   });
 
   test("backoff is capped at 6 hours", async () => {
-    respond = async () => new Response("no", { status: 503 });
+    respond = async () => 503;
     const id = await pending(11);
 
     await run();
@@ -250,7 +248,7 @@ describe("deliverDue", () => {
   });
 
   test("the 14th failed attempt marks the delivery dead", async () => {
-    respond = async () => new Response("no", { status: 500 });
+    respond = async () => 500;
     const id = await pending(13);
 
     await run();

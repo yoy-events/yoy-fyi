@@ -4,9 +4,22 @@ import { type AuthEnv, requireScope } from "./auth";
 import { apiError, isUuid, readJsonObject, validationFailed } from "./http";
 import { randomBase62 } from "./keys";
 import { sealSecret } from "./secretbox";
-import { checkTarget } from "./target-policy";
+import { type TargetRejection, checkTarget } from "./target-policy";
 
 const EVENTS = ["link.clicked"];
+
+// Webhooks are server-side requests, so they get stricter rules than link targets: https on
+// the default port only, which keeps deliveries away from internal services on other ports.
+export function webhookUrlRejection(raw: string): TargetRejection | null {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return "scheme";
+    if (url.port !== "") return "port";
+    return null;
+  } catch {
+    return "scheme";
+  }
+}
 
 type WebhookRow = {
   id: string;
@@ -72,9 +85,7 @@ export function webhookRoutes({ sql, publicOrigin, webhookKey, resolveHost }: De
     if (Object.keys(fields).length) return validationFailed(c, fields);
 
     const url = body.url as string;
-    const rejection = url.startsWith("https://")
-      ? await checkTarget(url, { ownHost, resolve: resolveHost })
-      : "scheme";
+    const rejection = webhookUrlRejection(url) ?? (await checkTarget(url, { ownHost, resolve: resolveHost }));
     if (rejection) return apiError(c, 422, "target_rejected", "The webhook URL is not allowed.", { reason: rejection });
     if (!webhookKey) throw new Error("WEBHOOK_ENC_KEY is not configured");
 

@@ -1,6 +1,9 @@
 import type { SQL } from "bun";
 import { openSecret } from "./secretbox";
-import { checkTarget } from "./target-policy";
+import { webhookUrlRejection } from "./webhooks";
+import http from "node:http";
+import https from "node:https";
+import { resolveTarget } from "./target-policy";
 
 const BATCH = 500;
 const SETTLE_MS = 5_000;
@@ -122,10 +125,45 @@ const MAX_BACKOFF_MS = 6 * 3_600_000;
 // 30 s doubling, capped at 6 h: the 14th attempt lands about 24 h after the first.
 const MAX_ATTEMPTS = 14;
 
+type PostRequest = { body: string; headers: Record<string, string> };
+
+// POSTs to `url` but connects to `address`, an IP that already passed the target policy, so
+// DNS cannot change between the check and the connection. TLS SNI and Host stay the hostname.
+// Redirects are never followed. Resolves to the response status.
+export function postPinned(url: string, req: PostRequest, address: string, timeoutMs = TIMEOUT_MS): Promise<number> {
+  const client = url.startsWith("https:") ? https : http;
+  const family = address.includes(":") ? 6 : 4;
+  return new Promise((resolve, reject) => {
+    const request = client.request(
+      url,
+      {
+        method: "POST",
+        headers: { ...req.headers, "Content-Length": String(Buffer.byteLength(req.body)) },
+        timeout: timeoutMs,
+        lookup: (_host, options, callback) =>
+          (options as { all?: boolean }).all
+            ? (callback as (e: null, a: { address: string; family: number }[]) => void)(null, [{ address, family }])
+            : callback(null, address, family),
+      },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      },
+    );
+    // Reject with our own error: Bun reports a destroyed request as a connection error.
+    request.on("timeout", () => {
+      reject(new Error(`timed out after ${timeoutMs} ms`));
+      request.destroy();
+    });
+    request.on("error", reject);
+    request.end(req.body);
+  });
+}
+
 type DeliverDeps = {
   key: CryptoKey;
   ownHost: string;
-  fetch?: typeof fetch;
+  post?: (url: string, req: PostRequest, address: string) => Promise<number>;
   resolveHost?: (host: string) => Promise<string[]>;
   now?: () => Date;
   random?: () => number;
@@ -139,7 +177,7 @@ export function sign(secret: string, timestamp: number, body: string): string {
 // Claims due deliveries with a one-minute lease (so a crash only delays them), POSTs each,
 // and records the outcome. Returns how many deliveries were attempted.
 export async function deliverDue(sql: SQL, deps: DeliverDeps): Promise<number> {
-  const { key, ownHost, fetch: send = fetch, resolveHost, now = () => new Date(), random = Math.random } = deps;
+  const { key, ownHost, post = postPinned, resolveHost, now = () => new Date(), random = Math.random } = deps;
   const at = now();
   const claimed: { id: string; payload: unknown; attempts: number; url: string; secret_enc: string }[] = await sql`
     with due as (
@@ -158,26 +196,28 @@ export async function deliverDue(sql: SQL, deps: DeliverDeps): Promise<number> {
     claimed.map(async (d) => {
       let status: number | null = null;
       let error: string | null = null;
-      const rejection = await checkTarget(d.url, { ownHost, resolve: resolveHost });
-      if (rejection) {
-        error = `target_rejected: ${rejection}`;
+      // Re-checked on every attempt: the host may resolve somewhere else than at registration.
+      const target = webhookUrlRejection(d.url)
+        ? { rejection: webhookUrlRejection(d.url)! }
+        : await resolveTarget(d.url, { ownHost, resolve: resolveHost });
+      if ("rejection" in target) {
+        error = `target_rejected: ${target.rejection}`;
       } else {
         const body = JSON.stringify(d.payload);
         try {
-          const res = await send(d.url, {
-            method: "POST",
-            body,
-            redirect: "manual",
-            signal: AbortSignal.timeout(TIMEOUT_MS),
-            headers: {
-              "Content-Type": "application/json",
-              "Yoy-Event": "link.clicked",
-              "Yoy-Delivery": d.id,
-              "Yoy-Signature": sign(await openSecret(key, d.secret_enc), Math.floor(at.getTime() / 1000), body),
+          status = await post(
+            d.url,
+            {
+              body,
+              headers: {
+                "Content-Type": "application/json",
+                "Yoy-Event": "link.clicked",
+                "Yoy-Delivery": d.id,
+                "Yoy-Signature": sign(await openSecret(key, d.secret_enc), Math.floor(at.getTime() / 1000), body),
+              },
             },
-          });
-          await res.body?.cancel();
-          status = res.status;
+            target.addresses[0]!,
+          );
           if (status < 200 || status >= 300) error = `HTTP ${status}`;
         } catch (err) {
           error = (err instanceof Error ? err.message : String(err)).slice(0, 300);
