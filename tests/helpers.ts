@@ -23,7 +23,7 @@ export function testDb(): Promise<SQL> {
 }
 
 export async function reset(sql: SQL): Promise<void> {
-  await sql`truncate clicks, links, api_keys, services, daily_salts, link_stats_hourly, link_stats_daily, link_dims_daily, webhook_deliveries, webhooks`;
+  await sql`truncate clicks, links, api_keys, services, daily_salts, link_stats_hourly, link_stats_daily, link_dims_daily, webhook_deliveries, webhooks, admin_login_tokens`;
   await sql`update outbox_cursor set last_click_id = '00000000-0000-0000-0000-000000000000', last_clicked_at = '2000-01-01Z'`;
 }
 
@@ -74,3 +74,18 @@ export async function addClick(sql: SQL, click: ClickInput): Promise<void> {
 
 // A fresh AES-256 key for webhook secrets, base64 like WEBHOOK_ENC_KEY.
 export const testWebhookKey = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64");
+
+export const ADMIN_EMAIL = "roman@example.com";
+
+// Admin wiring for tests: captures sent emails instead of calling Resend.
+export function testAdmin() {
+  const sent: { to: string; subject: string; text: string }[] = [];
+  return {
+    sent,
+    admin: {
+      email: ADMIN_EMAIL,
+      sessionSecret: "test-session-secret-at-least-32-characters",
+      sendEmail: async (mail: { to: string; subject: string; text: string }) => void sent.push(mail),
+    },
+  };
+}

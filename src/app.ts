@@ -1,6 +1,7 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
+import { type AdminConfig, adminRoutes } from "./admin";
 import { analyticsRoutes } from "./analytics";
 import { requireKey } from "./auth";
 import { type Click, describeUserAgent, insertClick, queryFields, refererHost } from "./click";
@@ -21,6 +22,7 @@ export type AppDeps = {
   resolveHost?: (host: string) => Promise<string[]>;
   createLimit?: RateLimit;
   webhookKey?: CryptoKey;
+  admin?: AdminConfig;
 };
 
 // The server passes the socket address as `ip`. In production the app port is reachable only
@@ -47,6 +49,7 @@ export function createApp({
   resolveHost,
   createLimit,
   webhookKey,
+  admin,
   countryOf,
   recordClick,
   now = () => new Date(),
@@ -57,13 +60,21 @@ export function createApp({
   const record = recordClick ?? ((click: Click) => insertClick(sql, click));
   const limitRedirect = createRateLimiter(redirectLimit);
 
-  app.use(
+  const headers = (csp: Record<string, string[]>) =>
     secureHeaders({
-      contentSecurityPolicy: { defaultSrc: ["'none'"], baseUri: ["'none'"], frameAncestors: ["'none'"] },
+      contentSecurityPolicy: { defaultSrc: ["'none'"], baseUri: ["'none'"], frameAncestors: ["'none'"], ...csp },
       strictTransportSecurity: "max-age=63072000; includeSubDomains",
       xFrameOptions: "DENY",
       referrerPolicy: "strict-origin-when-cross-origin",
-    }),
+    });
+  const publicHeaders = headers({});
+  // Admin pages load their stylesheet and QR images from this origin and post forms to it.
+  const adminHeaders = headers({ styleSrc: ["'self'"], imgSrc: ["'self'"], formAction: ["'self'"] });
+  app.use((c, next) => (c.req.path.startsWith("/admin") ? adminHeaders(c, next) : publicHeaders(c, next)));
+
+  const adminCss = Bun.file(new URL("./admin/admin.css", import.meta.url).pathname);
+  app.get("/static/admin.css", (c) =>
+    c.body(adminCss.stream(), 200, { "Content-Type": "text/css; charset=utf-8", "Cache-Control": "public, max-age=3600" }),
   );
 
   app.get("/health", (c) => c.json({ ok: true }));
@@ -75,6 +86,7 @@ export function createApp({
   v1.route("/", webhookRoutes({ sql, publicOrigin, webhookKey, resolveHost }));
   v1.route("/", linkRoutes({ sql, publicOrigin, resolveHost, createLimit }));
   app.route("/v1", v1);
+  if (admin) app.route("/admin", adminRoutes({ sql, publicOrigin, admin, now, resolveHost }));
 
   app.get("/:code", async (c) => {
     const code = c.req.param("code");
