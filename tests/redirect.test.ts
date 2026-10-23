@@ -9,7 +9,7 @@ let serviceId: string;
 
 beforeAll(async () => {
   sql = await testDb();
-  app = createApp({ sql, publicOrigin: "https://yoy.fyi" });
+  app = createApp({ sql, publicOrigin: "https://yoy.fyi", countryOf: () => null });
 });
 
 beforeEach(async () => {
