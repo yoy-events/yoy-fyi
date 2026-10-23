@@ -877,8 +877,9 @@ components:
             uniques_upper_bound:
               type: integer
               description: |
-                Sum of daily unique visitors. Exact for a single day; an upper bound across days,
-                because the visitor hash rotates daily.
+                Sum of daily unique visitors over the days the range touches. Exact for one link on
+                a single whole day; otherwise an upper bound, because the visitor hash rotates daily
+                and uniques are counted per link.
             bot_clicks:
               type: integer
               description: Bot clicks in the range, always reported, whatever `bots` is.
@@ -890,7 +891,11 @@ components:
             properties:
               t: { type: string, format: date-time, description: Bucket start }
               clicks: { type: integer }
-              uniques: { type: integer, description: Unique visitors within the bucket }
+              uniques:
+                type: integer
+                description: |
+                  Unique visitors within the bucket. Exact for one link; across several links
+                  (no `link_id`) it is the sum of per-link uniques, an upper bound.
 
     Breakdown:
       type: object
