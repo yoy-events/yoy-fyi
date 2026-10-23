@@ -1,7 +1,7 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { type AuthEnv, requireScope } from "./auth";
-import { apiError, readJsonObject, validationFailed } from "./http";
+import { apiError, isUuid, readJsonObject, validationFailed } from "./http";
 import { randomBase62 } from "./keys";
 import { type RateLimit, createRateLimiter } from "./ratelimit";
 import { checkTarget } from "./target-policy";
@@ -235,6 +235,15 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
         if (attempt >= 4) throw err;
       }
     }
+  });
+
+  app.get("/links/:id", requireScope("links:read"), async (c) => {
+    const id = c.req.param("id");
+    const [row] = isUuid(id)
+      ? await sql`select * from links where id = ${id} and service_id = ${c.get("caller").serviceId}`
+      : [];
+    if (!row) return apiError(c, 404, "not_found", "Link not found.");
+    return c.json(toLink(row as LinkRow, publicOrigin));
   });
 
   return app;

@@ -258,3 +258,41 @@ describe("create rate limit", () => {
     expect(res.headers.get("retry-after")).toBe("1");
   });
 });
+
+describe("GET /v1/links/{id}", () => {
+  test("returns the link", async () => {
+    const created = await (await create({ target_url: "https://example.com/", title: "t" })).json();
+
+    const res = await call("GET", `/v1/links/${created.id}`);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(created);
+  });
+
+  test("requires links:read", async () => {
+    const { token: writeOnly } = await issueKey(sql, { serviceSlug: "yoy", name: "wo", scopes: ["links:write"] });
+    const created = await (await create({ target_url: "https://example.com/" })).json();
+
+    expect((await call("GET", `/v1/links/${created.id}`, undefined, {}, app, writeOnly)).status).toBe(403);
+  });
+
+  test("reports expired and disabled status", async () => {
+    const created = await (await create({ target_url: "https://example.com/" })).json();
+    await sql`update links set expires_at = now() - interval '1 minute'`;
+    expect((await (await call("GET", `/v1/links/${created.id}`)).json()).status).toBe("expired");
+
+    await sql`update links set disabled_at = now()`;
+    expect((await (await call("GET", `/v1/links/${created.id}`)).json()).status).toBe("disabled");
+  });
+
+  test("another service's link is 404, as is a malformed or unknown id", async () => {
+    const { token: other } = await issueKey(sql, { serviceSlug: "diduny", name: "p", scopes: ["links:write"] });
+    const theirs = await (await call("POST", "/v1/links", { target_url: "https://example.com/" }, {}, app, other)).json();
+
+    for (const id of [theirs.id, "not-a-uuid", Bun.randomUUIDv7()]) {
+      const res = await call("GET", `/v1/links/${id}`);
+      expect(res.status).toBe(404);
+      expect(await errorCode(res)).toBe("not_found");
+    }
+  });
+});
