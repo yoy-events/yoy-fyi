@@ -1,6 +1,7 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
+import { analyticsRoutes } from "./analytics";
 import { requireKey } from "./auth";
 import { type Click, describeUserAgent, insertClick, queryFields, refererHost } from "./click";
 import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
@@ -67,6 +68,7 @@ export function createApp({
   const v1 = new Hono();
   v1.use(requireKey(sql));
   v1.route("/", keyRoutes(sql));
+  v1.route("/", analyticsRoutes(sql));
   v1.route("/", linkRoutes({ sql, publicOrigin, resolveHost, createLimit }));
   app.route("/v1", v1);
 
