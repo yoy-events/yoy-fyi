@@ -39,8 +39,9 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:2026.9.3
     restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "run"]
-    env_file: /etc/yoy-fyi/${STAGE:?}/tunnel.env # TUNNEL_TOKEN; the tunnel routes its hostnames to http://app:3000
+    # Every hostname routed to this tunnel goes to the app; the routes themselves live in Cloudflare DNS.
+    command: ["tunnel", "--no-autoupdate", "run", "--url", "http://app:3000"]
+    env_file: /etc/yoy-fyi/${STAGE:?}/tunnel.env # TUNNEL_TOKEN
     depends_on:
       app:
         condition: service_healthy
