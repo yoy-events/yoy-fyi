@@ -254,3 +254,57 @@ describe("POST /v1/links/{id}/disable", () => {
     expect((await disable("nope")).status).toBe(404);
   });
 });
+
+describe("QR codes", () => {
+  test("SVG encodes the short URL", async () => {
+    const link = await create({ code: "qr1" });
+
+    const res = await call("GET", `/v1/links/${link.id}/qr.svg`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/svg+xml");
+    const QRCode = await import("qrcode");
+    expect(await res.text()).toBe(await QRCode.toString("https://yoy.fyi/qr1", { type: "svg", margin: 2 }));
+  });
+
+  test("PNG defaults to 512 px and honours size", async () => {
+    const link = await create();
+    const width = async (res: Response) => {
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      expect([...bytes.slice(1, 4)]).toEqual([0x50, 0x4e, 0x47]); // "PNG"
+      return new DataView(bytes.buffer).getUint32(16); // IHDR width
+    };
+
+    const plain = await call("GET", `/v1/links/${link.id}/qr.png`);
+    const sized = await call("GET", `/v1/links/${link.id}/qr.png?size=256`);
+
+    expect(plain.headers.get("content-type")).toBe("image/png");
+    expect(await width(plain)).toBe(512);
+    expect(await width(sized)).toBe(256);
+  });
+
+  test.each(["127", "2049", "abc"])("size=%s returns 422", async (size) => {
+    const link = await create();
+
+    const res = await call("GET", `/v1/links/${link.id}/qr.png?size=${size}`);
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("validation_failed");
+  });
+
+  test("works for disabled links", async () => {
+    const link = await create();
+    await call("POST", `/v1/links/${link.id}/disable`);
+
+    expect((await call("GET", `/v1/links/${link.id}/qr.svg`)).status).toBe(200);
+  });
+
+  test("another service's link is 404 and links:read is required", async () => {
+    const { token: other } = await issueKey(sql, { serviceSlug: "diduny", name: "p", scopes: ["links:read"] });
+    const { token: writeOnly } = await issueKey(sql, { serviceSlug: "yoy", name: "wo", scopes: ["links:write"] });
+    const link = await create();
+
+    expect((await call("GET", `/v1/links/${link.id}/qr.svg`, undefined, other)).status).toBe(404);
+    expect((await call("GET", `/v1/links/${link.id}/qr.png`, undefined, writeOnly)).status).toBe(403);
+  });
+});

@@ -1,5 +1,6 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
+import QRCode from "qrcode";
 import { type AuthEnv, requireScope } from "./auth";
 import {
   apiError,
@@ -329,13 +330,30 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
     return c.json(toLink(row as LinkRow, publicOrigin));
   });
 
+  const findOwnLink = async (id: string, serviceId: string) =>
+    isUuid(id) ? ((await sql`select * from links where id = ${id} and service_id = ${serviceId}`)[0] as LinkRow | undefined) : undefined;
+
+  app.get("/links/:id/qr.svg", requireScope("links:read"), async (c) => {
+    const link = await findOwnLink(c.req.param("id"), c.get("caller").serviceId);
+    if (!link) return apiError(c, 404, "not_found", "Link not found.");
+    const svg = await QRCode.toString(`${publicOrigin}/${link.code}`, { type: "svg", margin: 2 });
+    return c.body(svg, 200, { "Content-Type": "image/svg+xml" });
+  });
+
+  app.get("/links/:id/qr.png", requireScope("links:read"), async (c) => {
+    const raw = c.req.query("size");
+    const size = raw === undefined ? 512 : Number(raw);
+    if (!Number.isInteger(size) || size < 128 || size > 2048) return validationFailed(c, { size: "integer 128-2048" });
+    const link = await findOwnLink(c.req.param("id"), c.get("caller").serviceId);
+    if (!link) return apiError(c, 404, "not_found", "Link not found.");
+    const png = await QRCode.toBuffer(`${publicOrigin}/${link.code}`, { type: "png", width: size, margin: 2 });
+    return c.body(new Uint8Array(png), 200, { "Content-Type": "image/png" });
+  });
+
   app.get("/links/:id", requireScope("links:read"), async (c) => {
-    const id = c.req.param("id");
-    const [row] = isUuid(id)
-      ? await sql`select * from links where id = ${id} and service_id = ${c.get("caller").serviceId}`
-      : [];
-    if (!row) return apiError(c, 404, "not_found", "Link not found.");
-    return c.json(toLink(row as LinkRow, publicOrigin));
+    const link = await findOwnLink(c.req.param("id"), c.get("caller").serviceId);
+    if (!link) return apiError(c, 404, "not_found", "Link not found.");
+    return c.json(toLink(link, publicOrigin));
   });
 
   return app;
