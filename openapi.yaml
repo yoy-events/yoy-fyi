@@ -1,0 +1,1020 @@
+openapi: 3.1.0
+info:
+  title: yoy.fyi API
+  version: 1.0.0-draft
+  summary: Short links and click analytics for Roman's services.
+  description: |
+    Contract for `/v1`. Architecture and rationale: `docs/adr/0001-architecture.md`.
+
+    Conventions:
+    - Auth: `Authorization: Bearer yfi_<prefix>_<secret>`. Each key belongs to one service and
+      sees only that service's links, analytics and webhooks. A resource owned by another
+      service returns 404, never 403.
+    - Times are RFC 3339 in UTC. Analytics buckets are UTC hours and UTC days.
+    - Lists use cursor pagination: pass `next_cursor` back as `cursor`. The cursor is opaque.
+    - Errors always use the `Error` shape.
+    - Rate-limited responses carry `RateLimit-Limit`, `RateLimit-Remaining` and
+      `RateLimit-Reset`; a 429 adds `Retry-After`.
+    - Nothing is ever hard-deleted. Links and webhooks are disabled instead.
+servers:
+  - url: https://yoy.fyi
+    description: Production
+  - url: https://yoy-fyi-test.fly.dev
+    description: Test app (latest PR)
+security:
+  - apiKey: []
+tags:
+  - name: links
+  - name: analytics
+  - name: keys
+  - name: webhooks
+
+paths:
+  /v1/links:
+    post:
+      tags: [links]
+      operationId: createLink
+      summary: Create a link (idempotent)
+      description: |
+        Requires `links:write`.
+
+        Idempotency, checked in this order:
+        1. `Idempotency-Key` seen before for this service with the same body → 200 with the
+           existing link. Same key with a different body → 422 `idempotency_key_reused`.
+        2. `external_ref` already used by a link of this service → 200 with that link,
+           whatever the rest of the body says.
+        3. Otherwise → 201 with the new link.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LinkCreate' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location: { schema: { type: string }, description: '`/v1/links/{id}`' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+        '200':
+          description: Existing link returned (idempotent replay)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: '`code_taken`: the custom code is already used (by any service).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    get:
+      tags: [links]
+      operationId: listLinks
+      summary: List links, newest first
+      description: Requires `links:read`.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: tag
+          in: query
+          description: Links carrying this tag.
+          schema: { $ref: '#/components/schemas/Tag' }
+        - name: code
+          in: query
+          schema: { $ref: '#/components/schemas/Code' }
+        - name: ext_service
+          in: query
+          schema: { type: string }
+        - name: ext_entity_type
+          in: query
+          schema: { type: string }
+        - name: ext_entity_id
+          in: query
+          schema: { type: string }
+        - name: created_after
+          in: query
+          schema: { type: string, format: date-time }
+        - name: created_before
+          in: query
+          schema: { type: string, format: date-time }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, expired, disabled, all]
+            default: all
+      responses:
+        '200':
+          description: A page of links
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Link' }
+                  next_cursor: { $ref: '#/components/schemas/NextCursor' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v1/links/{id}:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    get:
+      tags: [links]
+      operationId: getLink
+      summary: Get a link
+      description: Requires `links:read`.
+      responses:
+        '200':
+          description: The link
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [links]
+      operationId: updateLink
+      summary: Update target or metadata
+      description: |
+        Requires `links:write`. Fields left out are unchanged; `null` clears a nullable field.
+        `code` and `external_ref` cannot change. A disabled link returns 409 `link_disabled`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LinkUpdate' }
+      responses:
+        '200':
+          description: Updated link
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`link_disabled`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/links/{id}/disable:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    post:
+      tags: [links]
+      operationId: disableLink
+      summary: Disable a link (soft delete)
+      description: |
+        Requires `links:write`. The short URL starts answering 410. Idempotent: disabling a
+        disabled link returns 200 with `disabled_at` unchanged. There is no re-enable and the
+        code is never reused.
+      responses:
+        '200':
+          description: Disabled link
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/links/{id}/qr.svg:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    get:
+      tags: [links]
+      operationId: getLinkQrSvg
+      summary: QR code for the short URL, as SVG
+      description: Requires `links:read`. Works for disabled links too.
+      responses:
+        '200':
+          description: SVG image
+          content:
+            image/svg+xml:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/links/{id}/qr.png:
+    parameters:
+      - $ref: '#/components/parameters/LinkId'
+    get:
+      tags: [links]
+      operationId: getLinkQrPng
+      summary: QR code for the short URL, as PNG
+      description: Requires `links:read`. Works for disabled links too.
+      parameters:
+        - name: size
+          in: query
+          description: Width and height in pixels.
+          schema: { type: integer, minimum: 128, maximum: 2048, default: 512 }
+      responses:
+        '200':
+          description: PNG image
+          content:
+            image/png:
+              schema: { type: string, contentEncoding: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/analytics/timeseries:
+    get:
+      tags: [analytics]
+      operationId: getTimeseries
+      summary: Clicks over time for one link or the whole service
+      description: |
+        Requires `analytics:read`. Reads rollups, so data is at most 5 minutes old.
+        Buckets with no clicks are returned with zeros. Range limits: `hour` up to 31 days,
+        `day` up to 400 days; larger ranges return 422 `range_too_large`.
+      parameters:
+        - $ref: '#/components/parameters/AnalyticsLinkId'
+        - $ref: '#/components/parameters/AnalyticsTag'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Bots'
+        - name: interval
+          in: query
+          required: true
+          schema: { type: string, enum: [hour, day] }
+      responses:
+        '200':
+          description: Time series
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Timeseries' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/analytics/breakdown:
+    get:
+      tags: [analytics]
+      operationId: getBreakdown
+      summary: Clicks grouped by one dimension, highest first
+      description: |
+        Requires `analytics:read`. Day granularity, so `from` and `to` are rounded out to whole
+        UTC days. Range limit 400 days. A `null` value means the click had no value for the
+        dimension (for example, no referer).
+      parameters:
+        - $ref: '#/components/parameters/AnalyticsLinkId'
+        - $ref: '#/components/parameters/AnalyticsTag'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Bots'
+        - name: dimension
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Dimension' }
+        - name: limit
+          in: query
+          description: Top N values; the rest are summed into `other_clicks`.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Breakdown
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Breakdown' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/me:
+    get:
+      tags: [keys]
+      operationId: getMe
+      summary: The calling key and its service
+      description: Any valid key. Useful as a startup check in client apps.
+      responses:
+        '200':
+          description: Caller identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service, key]
+                properties:
+                  service: { $ref: '#/components/schemas/Service' }
+                  key: { $ref: '#/components/schemas/ApiKey' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/keys:
+    get:
+      tags: [keys]
+      operationId: listKeys
+      summary: List this service's keys
+      description: Requires `keys:manage`. Secrets are never returned.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: include_revoked
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: A page of keys
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApiKey' }
+                  next_cursor: { $ref: '#/components/schemas/NextCursor' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [keys]
+      operationId: createKey
+      summary: Create a key for this service (rotation)
+      description: |
+        Requires `keys:manage`. The new key's scopes must be a subset of the caller's scopes.
+        `secret` is returned only in this response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, scopes]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                scopes:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items: { $ref: '#/components/schemas/Scope' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key, secret]
+                properties:
+                  key: { $ref: '#/components/schemas/ApiKey' }
+                  secret:
+                    type: string
+                    description: Full key. Shown once.
+                    examples: ['yfi_a1B2c3D4_9fK2mQ7xZpL0vR8sT3uW5yA1bC6dE4gH']
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/keys/{id}/revoke:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [keys]
+      operationId: revokeKey
+      summary: Revoke a key
+      description: |
+        Requires `keys:manage`. Takes effect on the key's next request. Idempotent. A key may
+        revoke itself.
+      responses:
+        '200':
+          description: Revoked key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiKey' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/webhooks:
+    get:
+      tags: [webhooks]
+      operationId: listWebhooks
+      summary: List this service's webhooks
+      description: Requires `webhooks:manage`. Secrets are never returned.
+      responses:
+        '200':
+          description: All webhooks of the service
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Webhook' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [webhooks]
+      operationId: createWebhook
+      summary: Register a webhook
+      description: |
+        Requires `webhooks:manage`. The URL gets the same checks as link targets (https only
+        here, no private or own hosts). `secret` is returned only in this response. To rotate,
+        create a new webhook and disable the old one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url]
+              properties:
+                url: { type: string, format: uri, maxLength: 2048 }
+                events:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items: { $ref: '#/components/schemas/EventType' }
+                  default: [link.clicked]
+                include_bots:
+                  type: boolean
+                  default: false
+                  description: Also send clicks flagged as bots or link-preview crawlers.
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [webhook, secret]
+                properties:
+                  webhook: { $ref: '#/components/schemas/Webhook' }
+                  secret:
+                    type: string
+                    description: HMAC signing secret. Shown once.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/webhooks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/WebhookId'
+    get:
+      tags: [webhooks]
+      operationId: getWebhook
+      summary: Get a webhook
+      description: Requires `webhooks:manage`.
+      responses:
+        '200':
+          description: The webhook
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Webhook' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/webhooks/{id}/disable:
+    parameters:
+      - $ref: '#/components/parameters/WebhookId'
+    post:
+      tags: [webhooks]
+      operationId: disableWebhook
+      summary: Disable a webhook
+      description: |
+        Requires `webhooks:manage`. No new deliveries are created; pending ones are marked
+        dead. Idempotent.
+      responses:
+        '200':
+          description: Disabled webhook
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Webhook' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/webhooks/{id}/deliveries:
+    parameters:
+      - $ref: '#/components/parameters/WebhookId'
+    get:
+      tags: [webhooks]
+      operationId: listDeliveries
+      summary: Recent deliveries, newest first
+      description: Requires `webhooks:manage`. For debugging a receiver.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, delivered, dead] }
+      responses:
+        '200':
+          description: A page of deliveries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Delivery' }
+                  next_cursor: { $ref: '#/components/schemas/NextCursor' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+webhooks:
+  link.clicked:
+    post:
+      operationId: onLinkClicked
+      summary: A short link was clicked
+      description: |
+        Sent once per click to each active webhook of the link's service (bots only when
+        `include_bots`). Delivery is at least once: dedupe on `id`, which is the click id and
+        stays the same across retries.
+
+        Verify: split `Yoy-Signature` into `t` and `v1`, compute
+        `hex(hmac_sha256(secret, t + "." + raw_body))`, compare in constant time with `v1`,
+        and reject if `t` is more than 300 s from now.
+
+        Any 2xx acknowledges. Anything else, or no answer within 5 s, is retried with
+        exponential backoff for about 24 h.
+      parameters:
+        - name: Yoy-Signature
+          in: header
+          required: true
+          schema: { type: string, examples: ['t=1792742400,v1=5f2b…'] }
+        - name: Yoy-Event
+          in: header
+          required: true
+          schema: { $ref: '#/components/schemas/EventType' }
+        - name: Yoy-Delivery
+          in: header
+          required: true
+          description: Delivery id, unique per (webhook, click).
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LinkClickedEvent' }
+      responses:
+        '2XX':
+          description: Acknowledged
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: yfi_<prefix>_<secret>
+
+  parameters:
+    LinkId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    WebhookId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    AnalyticsLinkId:
+      name: link_id
+      in: query
+      description: One link. Omit for the whole service.
+      schema: { type: string, format: uuid }
+    AnalyticsTag:
+      name: tag
+      in: query
+      description: Only links carrying this tag. Combines with `link_id` as AND.
+      schema: { $ref: '#/components/schemas/Tag' }
+    From:
+      name: from
+      in: query
+      required: true
+      description: Inclusive, rounded down to the bucket start.
+      schema: { type: string, format: date-time }
+    To:
+      name: to
+      in: query
+      required: true
+      description: Exclusive, rounded up to the bucket end.
+      schema: { type: string, format: date-time }
+    Bots:
+      name: bots
+      in: query
+      schema:
+        type: string
+        enum: [exclude, include, only]
+        default: exclude
+
+  responses:
+    BadRequest:
+      description: '`invalid_request`: malformed JSON or an invalid query parameter.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: '`unauthorized`: missing, unknown or revoked key.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: '`missing_scope`: the key lacks the required scope.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: '`not_found`: does not exist or belongs to another service.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unprocessable:
+      description: |
+        Validation failed. Codes: `validation_failed`, `target_rejected`, `code_reserved`,
+        `idempotency_key_reused`, `range_too_large`, `scope_not_allowed`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyRequests:
+      description: '`rate_limited`'
+      headers:
+        Retry-After: { schema: { type: integer }, description: Seconds }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_request
+                - unauthorized
+                - missing_scope
+                - not_found
+                - code_taken
+                - link_disabled
+                - validation_failed
+                - target_rejected
+                - code_reserved
+                - idempotency_key_reused
+                - range_too_large
+                - scope_not_allowed
+                - rate_limited
+                - internal
+            message: { type: string }
+            details:
+              type: object
+              description: |
+                Machine-readable context. For `validation_failed`: `{ fields: { <path>: <reason> } }`.
+                For `target_rejected`: `{ reason: scheme | credentials | private_address |
+                own_host | unresolvable | too_long }`.
+              additionalProperties: true
+
+    Code:
+      type: string
+      pattern: '^[A-Za-z0-9_-]{1,64}$'
+      description: Case-sensitive. Reserved system paths are rejected with `code_reserved`.
+
+    Tag:
+      type: string
+      pattern: '^[a-z0-9][a-z0-9_:.-]{0,39}$'
+
+    Scope:
+      type: string
+      enum: [links:write, links:read, analytics:read, keys:manage, webhooks:manage]
+
+    EventType:
+      type: string
+      enum: [link.clicked]
+
+    Dimension:
+      type: string
+      enum: [referer_host, utm_source, utm_medium, utm_campaign, country, device, browser, os]
+
+    NextCursor:
+      type: [string, 'null']
+      description: '`null` on the last page.'
+
+    UtmDefaults:
+      type: object
+      additionalProperties: false
+      description: |
+        Appended to the target on redirect. A parameter already present in the target URL, or in
+        the incoming short-link request, is never overwritten.
+      properties:
+        utm_source: { type: string, maxLength: 200 }
+        utm_medium: { type: string, maxLength: 200 }
+        utm_campaign: { type: string, maxLength: 200 }
+        utm_term: { type: string, maxLength: 200 }
+        utm_content: { type: string, maxLength: 200 }
+
+    ExternalRef:
+      type: object
+      additionalProperties: false
+      required: [service, entity_type, entity_id]
+      description: Unique per yoy.fyi service. Used for idempotent create and lookup.
+      properties:
+        service: { type: string, minLength: 1, maxLength: 64, examples: [yoy] }
+        entity_type: { type: string, minLength: 1, maxLength: 64, examples: [event] }
+        entity_id: { type: string, minLength: 1, maxLength: 128, examples: ['evt_123'] }
+
+    TargetUrl:
+      type: string
+      format: uri
+      maxLength: 2048
+      description: |
+        http or https only; no credentials; not a private, loopback or link-local address; not a
+        yoy.fyi host. Violations return 422 `target_rejected`.
+
+    LinkCreate:
+      type: object
+      additionalProperties: false
+      required: [target_url]
+      properties:
+        target_url: { $ref: '#/components/schemas/TargetUrl' }
+        code:
+          $ref: '#/components/schemas/Code'
+          description: Custom code. Omit for a generated 7-character code.
+        title: { type: string, maxLength: 200 }
+        tags:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Tag' }
+        utm_defaults: { $ref: '#/components/schemas/UtmDefaults' }
+        pass_click_id:
+          type: boolean
+          default: false
+          description: Append `yoy_sid=<click id>` to the target on redirect.
+        expires_at:
+          type: string
+          format: date-time
+          description: Must be in the future. After it, the short URL answers 410.
+        external_ref: { $ref: '#/components/schemas/ExternalRef' }
+
+    LinkUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        target_url: { $ref: '#/components/schemas/TargetUrl' }
+        title: { type: [string, 'null'], maxLength: 200 }
+        tags:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Tag' }
+        utm_defaults:
+          oneOf:
+            - $ref: '#/components/schemas/UtmDefaults'
+            - type: 'null'
+        pass_click_id: { type: boolean }
+        expires_at: { type: [string, 'null'], format: date-time }
+
+    Link:
+      type: object
+      required:
+        - id
+        - code
+        - short_url
+        - target_url
+        - title
+        - tags
+        - utm_defaults
+        - pass_click_id
+        - expires_at
+        - external_ref
+        - status
+        - created_at
+        - updated_at
+        - disabled_at
+      properties:
+        id: { type: string, format: uuid }
+        code: { $ref: '#/components/schemas/Code' }
+        short_url: { type: string, format: uri, examples: ['https://yoy.fyi/aB3dE7x'] }
+        target_url: { type: string, format: uri }
+        title: { type: [string, 'null'] }
+        tags:
+          type: array
+          items: { $ref: '#/components/schemas/Tag' }
+        utm_defaults:
+          oneOf:
+            - $ref: '#/components/schemas/UtmDefaults'
+            - type: 'null'
+        pass_click_id: { type: boolean }
+        expires_at: { type: [string, 'null'], format: date-time }
+        external_ref:
+          oneOf:
+            - $ref: '#/components/schemas/ExternalRef'
+            - type: 'null'
+        status:
+          type: string
+          enum: [active, expired, disabled]
+          description: '`disabled` wins over `expired`.'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        disabled_at: { type: [string, 'null'], format: date-time }
+
+    Timeseries:
+      type: object
+      required: [interval, from, to, bots, totals, points]
+      properties:
+        interval: { type: string, enum: [hour, day] }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        bots: { type: string, enum: [exclude, include, only] }
+        totals:
+          type: object
+          required: [clicks, uniques_upper_bound, bot_clicks]
+          properties:
+            clicks: { type: integer }
+            uniques_upper_bound:
+              type: integer
+              description: |
+                Sum of daily unique visitors. Exact for a single day; an upper bound across days,
+                because the visitor hash rotates daily.
+            bot_clicks:
+              type: integer
+              description: Bot clicks in the range, always reported, whatever `bots` is.
+        points:
+          type: array
+          items:
+            type: object
+            required: [t, clicks, uniques]
+            properties:
+              t: { type: string, format: date-time, description: Bucket start }
+              clicks: { type: integer }
+              uniques: { type: integer, description: Unique visitors within the bucket }
+
+    Breakdown:
+      type: object
+      required: [dimension, from, to, bots, total_clicks, other_clicks, items]
+      properties:
+        dimension: { $ref: '#/components/schemas/Dimension' }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        bots: { type: string, enum: [exclude, include, only] }
+        total_clicks: { type: integer }
+        other_clicks: { type: integer, description: Clicks outside the top `limit` values }
+        items:
+          type: array
+          items:
+            type: object
+            required: [value, clicks]
+            properties:
+              value:
+                type: [string, 'null']
+                description: |
+                  `country` is ISO 3166-1 alpha-2. `device` is one of desktop, mobile, tablet,
+                  tv, bot, other.
+              clicks: { type: integer }
+
+    Service:
+      type: object
+      required: [id, slug, name]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string, examples: [yoy] }
+        name: { type: string }
+
+    ApiKey:
+      type: object
+      required: [id, name, prefix, scopes, created_at, last_used_at, revoked_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        prefix:
+          type: string
+          description: The `yfi_<prefix>` part, for recognising a key without its secret.
+          examples: [yfi_a1B2c3D4]
+        scopes:
+          type: array
+          items: { $ref: '#/components/schemas/Scope' }
+        created_at: { type: string, format: date-time }
+        last_used_at:
+          type: [string, 'null']
+          format: date-time
+          description: Accurate to about one minute.
+        revoked_at: { type: [string, 'null'], format: date-time }
+
+    Webhook:
+      type: object
+      required: [id, url, events, include_bots, created_at, disabled_at]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/EventType' }
+        include_bots: { type: boolean }
+        created_at: { type: string, format: date-time }
+        disabled_at: { type: [string, 'null'], format: date-time }
+
+    Delivery:
+      type: object
+      required: [id, event_id, status, attempts, next_attempt_at, last_status, last_error, created_at, delivered_at]
+      properties:
+        id: { type: string, format: uuid }
+        event_id: { type: string, format: uuid, description: The click id }
+        status: { type: string, enum: [pending, delivered, dead] }
+        attempts: { type: integer }
+        next_attempt_at: { type: [string, 'null'], format: date-time }
+        last_status: { type: [integer, 'null'], description: HTTP status of the last attempt }
+        last_error: { type: [string, 'null'], description: Timeout or connection error text }
+        created_at: { type: string, format: date-time }
+        delivered_at: { type: [string, 'null'], format: date-time }
+
+    LinkClickedEvent:
+      type: object
+      required: [id, type, created_at, data]
+      properties:
+        id: { type: string, format: uuid, description: Click id; the dedupe key }
+        type: { type: string, const: link.clicked }
+        created_at: { type: string, format: date-time }
+        data:
+          type: object
+          required: [link, click]
+          properties:
+            link:
+              type: object
+              required: [id, code, short_url, tags, external_ref]
+              properties:
+                id: { type: string, format: uuid }
+                code: { $ref: '#/components/schemas/Code' }
+                short_url: { type: string, format: uri }
+                tags:
+                  type: array
+                  items: { $ref: '#/components/schemas/Tag' }
+                external_ref:
+                  oneOf:
+                    - $ref: '#/components/schemas/ExternalRef'
+                    - type: 'null'
+            click:
+              type: object
+              description: Never contains the IP address or the visitor hash.
+              required: [id, clicked_at, is_bot, bot_name, country, device, browser, os, referer_host]
+              properties:
+                id: { type: string, format: uuid }
+                clicked_at: { type: string, format: date-time }
+                is_bot: { type: boolean }
+                bot_name: { type: [string, 'null'] }
+                country: { type: [string, 'null'] }
+                device: { type: [string, 'null'] }
+                browser: { type: [string, 'null'] }
+                os: { type: [string, 'null'] }
+                referer_host: { type: [string, 'null'] }
+                utm_source: { type: [string, 'null'] }
+                utm_medium: { type: [string, 'null'] }
+                utm_campaign: { type: [string, 'null'] }
+                utm_term: { type: [string, 'null'] }
+                utm_content: { type: [string, 'null'] }
+                fbclid: { type: [string, 'null'] }
+                gclid: { type: [string, 'null'] }
+                fbc: { type: [string, 'null'] }
+                fbp: { type: [string, 'null'] }
