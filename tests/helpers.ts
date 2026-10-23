@@ -24,6 +24,7 @@ export function testDb(): Promise<SQL> {
 
 export async function reset(sql: SQL): Promise<void> {
   await sql`truncate clicks, links, api_keys, services, daily_salts, link_stats_hourly, link_stats_daily, link_dims_daily, webhook_deliveries, webhooks`;
+  await sql`update outbox_cursor set last_click_id = '00000000-0000-0000-0000-000000000000', last_clicked_at = '2000-01-01Z'`;
 }
 
 export async function createService(sql: SQL, slug = "yoy"): Promise<string> {
