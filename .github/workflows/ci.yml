@@ -40,8 +40,11 @@ jobs:
 
   deploy:
     needs: check
-    # Fork PRs never reach the self-hosted runner.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    # The runner shares the VM and Docker daemon with production, so only code pushed by people with write
+    # access runs here: fork PRs and bot PRs (Dependabot and the like) never reach it (ADR-0002, Consequences).
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')
     runs-on: [self-hosted, yoy-fyi]
     timeout-minutes: 15
     environment: ${{ github.event_name == 'push' && 'production' || 'test' }}

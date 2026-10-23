@@ -66,7 +66,7 @@ None for now; a separate decision later.
 - Hosting costs $0 beyond the electricity and internet already paid for.
 - Every short link, including printed QR codes, is down whenever the machine, its power or its internet is down. A UPS for the PC and router reduces this.
 - No backups: losing the VM disk loses every link and click. This is accepted for now.
-- `docker` group membership is root-equivalent on the VM; the runner must only run this repo's workflows, which is why the repo is private and forks are excluded.
+- `docker` group membership is root-equivalent on the VM, and the test deploy shares that Docker daemon with production. Any branch pushed to this repo, including its workflow file, can therefore read production secrets and data. Accepted: only Roman has write access, the repo is private, and fork and bot PRs never reach the runner. A collaborator with write access, or automated PRs, would require a separate test VM first.
 - Moving the zone to Cloudflare touches records the current Fly app uses.
 - If the residential plan forbids servers, or uptime becomes a problem, the same compose file runs on any Linux VM; only the tunnel token changes.
 
