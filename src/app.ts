@@ -1,8 +1,10 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
+import { requireKey } from "./auth";
 import { type Click, describeUserAgent, insertClick, queryFields, refererHost } from "./click";
 import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
+import { keyRoutes } from "./keys";
 import { createSaltSource, visitorHash } from "./salt";
 import { buildTarget } from "./target";
 
@@ -55,6 +57,11 @@ export function createApp({
   );
 
   app.get("/health", (c) => c.json({ ok: true }));
+
+  const v1 = new Hono();
+  v1.use(requireKey(sql));
+  v1.route("/", keyRoutes(sql));
+  app.route("/v1", v1);
 
   app.get("/:code", async (c) => {
     const code = c.req.param("code");

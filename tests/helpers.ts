@@ -23,7 +23,7 @@ export function testDb(): Promise<SQL> {
 }
 
 export async function reset(sql: SQL): Promise<void> {
-  await sql`truncate clicks, links, services, daily_salts`;
+  await sql`truncate clicks, links, api_keys, services, daily_salts`;
 }
 
 export async function createService(sql: SQL, slug = "yoy"): Promise<string> {
