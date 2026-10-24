@@ -55,31 +55,36 @@ export function LinkForm({ slug, values = {}, errors = [] }: { slug: string; val
         Target URL
         <input type="url" name="target_url" required value={values.target_url ?? ""} placeholder="https://" />
       </label>
-      <label>
-        Custom code <span class="meta">(optional)</span>
-        <input name="code" value={values.code ?? ""} pattern="[A-Za-z0-9_-]{1,64}" />
-      </label>
-      <label>
-        Title
-        <input name="title" value={values.title ?? ""} maxlength={200} />
-      </label>
-      <label>
-        Tags <span class="meta">(comma-separated)</span>
-        <input name="tags" value={values.tags ?? ""} />
-      </label>
-      {UTM.map((k) => (
-        <label>
-          {k}
-          <input name={k} value={values[k] ?? ""} />
-        </label>
-      ))}
-      <label>
-        Expires <span class="meta">(UTC)</span>
-        <input type="datetime-local" name="expires_at" value={values.expires_at ?? ""} />
-      </label>
-      <label class="check">
-        <input type="checkbox" name="pass_click_id" checked={values.pass_click_id === "on"} /> Pass click id as yoy_sid
-      </label>
+      <details open={Object.entries(values).some(([k, v]) => k !== "target_url" && v)}>
+        <summary>More options</summary>
+        <div class="stack">
+          <label>
+            Custom code <span class="meta">(optional)</span>
+            <input name="code" value={values.code ?? ""} pattern="[A-Za-z0-9_-]{1,64}" />
+          </label>
+          <label>
+            Title
+            <input name="title" value={values.title ?? ""} maxlength={200} />
+          </label>
+          <label>
+            Tags <span class="meta">(comma-separated)</span>
+            <input name="tags" value={values.tags ?? ""} />
+          </label>
+          {UTM.map((k) => (
+            <label>
+              {k}
+              <input name={k} value={values[k] ?? ""} />
+            </label>
+          ))}
+          <label>
+            Expires <span class="meta">(UTC)</span>
+            <input type="datetime-local" name="expires_at" value={values.expires_at ?? ""} />
+          </label>
+          <label class="check">
+            <input type="checkbox" name="pass_click_id" checked={values.pass_click_id === "on"} /> Pass click id as yoy_sid
+          </label>
+        </div>
+      </details>
       <button type="submit">Create link</button>
     </form>
   );
