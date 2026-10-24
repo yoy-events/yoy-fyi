@@ -66,6 +66,7 @@ async function startToken(c = cookie) {
 }
 async function connected() {
   await update(`/start ${await startToken()}`);
+  await update("/confirm");
   sent = [];
 }
 
@@ -91,11 +92,16 @@ beforeEach(async () => {
 });
 
 describe("connecting an account", () => {
-  test("the account page offers Connect, and /start with the token links the Telegram user", async () => {
+  test("the account page offers Connect; /start names the account and /confirm links it", async () => {
     expect(await (await get("/account/telegram")).text()).toContain('action="/account/telegram/connect"');
     const res = await update(`/start ${await startToken()}`);
     expect(res.status).toBe(200);
     expect(lastText()).toContain("ann@example.com");
+    expect(lastText()).toContain("/confirm");
+    expect((await sql`select telegram_user_id from users`)[0].telegram_user_id).toBeNull();
+
+    await update("/confirm");
+    expect(lastText()).toContain("Connected to ann@example.com");
     expect((await sql`select telegram_user_id from users`)[0].telegram_user_id).toBe(String(TG_USER));
     expect(await (await get("/account/telegram")).text()).toContain("Connected");
   });
@@ -110,19 +116,34 @@ describe("connecting an account", () => {
     ["a used token", async () => {
       const t = await startToken();
       await update(`/start ${t}`, { from: 999 });
+      await update("/confirm", { from: 999 });
       return t;
     }],
   ])("%s does not connect", async (_, token) => {
     const t = await token();
     await update(`/start ${t}`);
+    await update("/confirm");
     expect(lastText()).toContain("/account/telegram");
     expect((await sql`select 1 from users where telegram_user_id = ${TG_USER}`)).toHaveLength(0);
   });
 
-  test("a Telegram user already linked to someone else is moved to the new account", async () => {
+  test("/start alone, or /confirm without a claimed token, links nothing", async () => {
+    await update("/confirm");
+    expect(lastText()).toContain("Nothing to confirm");
+    expect(await sql`select 1 from users where telegram_user_id is not null`).toHaveLength(0);
+  });
+
+  test("a token claimed by one Telegram user cannot be confirmed by another", async () => {
+    await update(`/start ${await startToken()}`);
+    await update("/confirm", { from: 999 });
+    expect(await sql`select 1 from users where telegram_user_id is not null`).toHaveLength(0);
+  });
+
+  test("a confirmed connection to another account moves the Telegram user", async () => {
     await connected();
     const bob = await signIn("g-bob", "bob@example.com");
     await update(`/start ${await startToken(bob)}`);
+    await update("/confirm");
     const rows = await sql`select email from users where telegram_user_id = ${TG_USER}`;
     expect(rows.map((r: { email: string }) => r.email)).toEqual(["bob@example.com"]);
   });

@@ -80,14 +80,32 @@ export function telegramRoutes({ sql, publicOrigin, telegram, now, resolveHost, 
   const reply = (chatId: number, text: string) => telegram.api.call("sendMessage", { chat_id: chatId, text, link_preview_options: { is_disabled: true } });
 
   async function handle(fromId: number, chatId: number, text: string) {
+    // Connecting takes two steps on the Telegram side: /start <token> names the account, and
+    // /confirm links it. Someone who sends a victim their own connect link cannot link the
+    // victim's Telegram without the victim reading whose account it is and confirming.
     const start = /^\/start(?:\s+([A-Za-z0-9_-]{1,64}))?$/.exec(text);
     if (start?.[1]) {
       const at = now();
+      const [claimed] = await sql`
+        update telegram_connect_tokens t set claimed_by = ${fromId}
+        from users u
+        where t.token_hash = ${sha256(start[1])} and t.used_at is null and t.expires_at > ${at} and u.id = t.user_id
+        returning u.email`;
+      if (!claimed) return reply(chatId, `This connect link has expired. Open ${publicOrigin}/account/telegram and try again.`);
+      return reply(
+        chatId,
+        `This connects your Telegram to the yoy.fyi account ${claimed.email}. Links you send here will belong to that account. If it is yours, send /confirm. If not, ignore this.`,
+      );
+    }
+    if (text === "/confirm") {
+      const at = now();
       const [used] = await sql`
         update telegram_connect_tokens set used_at = ${at}
-        where token_hash = ${sha256(start[1])} and used_at is null and expires_at > ${at}
+        where token_hash = (select token_hash from telegram_connect_tokens
+                            where claimed_by = ${fromId} and used_at is null and expires_at > ${at}
+                            order by expires_at desc limit 1)
         returning user_id`;
-      if (!used) return reply(chatId, `This connect link has expired. Open ${publicOrigin}/account/telegram and try again.`);
+      if (!used) return reply(chatId, `Nothing to confirm. Open ${publicOrigin}/account/telegram to connect.`);
       const [user] = await sql.begin(async (tx) => {
         await tx`update users set telegram_user_id = null where telegram_user_id = ${fromId}`;
         return tx`update users set telegram_user_id = ${fromId} where id = ${used.user_id} and disabled_at is null returning email`;

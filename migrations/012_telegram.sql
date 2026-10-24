@@ -1,11 +1,12 @@
 -- The Telegram bot (ADR-0006): a user connects one Telegram account through a one-time /start
--- token and then shortens links by sending them to the bot.
+-- token, which the Telegram user then confirms with /confirm, and shortens links by sending them.
 alter table users add column telegram_user_id bigint unique;
 
 create table telegram_connect_tokens (
   token_hash text primary key,
   user_id    uuid not null references users (id),
   expires_at timestamptz not null,
+  claimed_by bigint, -- the Telegram user who sent /start with it and still has to /confirm
   used_at    timestamptz
 );
 
