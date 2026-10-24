@@ -45,7 +45,7 @@ export async function readJsonObject(c: Context): Promise<Record<string, unknown
 // Cursors are the last row's id (UUIDv7, so creation order), base64url-encoded to stay opaque.
 export const encodeCursor = (id: string) => Buffer.from(id).toString("base64url");
 export function decodeCursor(cursor: string | undefined): string | null | undefined {
-  if (!cursor) return undefined;
+  if (cursor === undefined) return undefined;
   const id = Buffer.from(cursor, "base64url").toString();
   return isUuid(id) ? id : null;
 }

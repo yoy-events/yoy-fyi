@@ -6,6 +6,8 @@ const adminUrl = process.env.TEST_ADMIN_DATABASE_URL ?? "postgres://postgres:pos
 const dbName = "yoy_fyi_migrate_test";
 const admin = new SQL(adminUrl);
 let sql: SQL;
+// Creating and dropping a database can take several seconds on Docker Desktop disks.
+const HOOK_TIMEOUT = 30_000;
 
 beforeAll(async () => {
   await admin.unsafe(`drop database if exists ${dbName} with (force)`);
@@ -13,13 +15,13 @@ beforeAll(async () => {
   const url = new URL(adminUrl);
   url.pathname = `/${dbName}`;
   sql = new SQL(url.toString());
-});
+}, HOOK_TIMEOUT);
 
 afterAll(async () => {
   await sql.close();
   await admin.unsafe(`drop database if exists ${dbName} with (force)`);
   await admin.close();
-});
+}, HOOK_TIMEOUT);
 
 test("creates the schema and records each migration once", async () => {
   await migrate(sql);
