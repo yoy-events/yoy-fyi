@@ -9,6 +9,7 @@ import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
 import { keyRoutes } from "./keys";
 import { type Preview, linkRoutes } from "./links";
 import { mcpRoutes } from "./mcp";
+import { type TelegramConfig, telegramRoutes } from "./telegram";
 import { webRoutes } from "./web";
 import { type FetchClientMetadata, fetchClientMetadata, oauthRoutes } from "./oauth";
 import type { UnsafeUrls } from "./safe-browsing";
@@ -30,6 +31,8 @@ export type AppDeps = {
   webhookKey?: CryptoKey;
   admin?: AdminConfig;
   mcpLimit?: RateLimit;
+  // The Telegram bot; without it there is no webhook and no Telegram account page.
+  telegram?: TelegramConfig;
   clientMetadata?: FetchClientMetadata;
 };
 
@@ -75,6 +78,7 @@ export function createApp({
   admin,
   mcpLimit,
   clientMetadata,
+  telegram,
   countryOf,
   recordClick,
   now = () => new Date(),
@@ -137,9 +141,10 @@ export function createApp({
   v1.route("/", linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createLimit }));
   app.route("/v1", v1);
 
+  if (telegram) app.route("/", telegramRoutes({ sql, publicOrigin, telegram, now, resolveHost, unsafeUrls }));
   app.post("/mcp", mcpRoutes({ sql, publicOrigin, v1, now, limit: mcpLimit }));
   if (admin) {
-    app.route("/", webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUrls }));
+    app.route("/", webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUrls, telegramBot: telegram?.username }));
     const ownHost = new URL(publicOrigin).hostname;
     const metadata = clientMetadata ?? fetchClientMetadata({ ownHost, resolveHost });
     app.route("/", oauthRoutes({ sql, publicOrigin, admin, now, clientMetadata: metadata }));

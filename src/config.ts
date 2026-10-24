@@ -27,6 +27,9 @@ export function loadConfig(env = process.env) {
     // Optional secret: a Google API key with the Safe Browsing API enabled. Without it link
     // targets are not checked against Safe Browsing.
     safeBrowsingApiKey: env.SAFE_BROWSING_API_KEY || undefined,
+    // Optional secret: the Telegram bot token from @BotFather. Set it on one stage only: the bot
+    // has one webhook, and each start points it at this stage.
+    telegramBotToken: env.TELEGRAM_BOT_TOKEN || undefined,
   };
 }
 

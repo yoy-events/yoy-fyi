@@ -9,6 +9,7 @@ import { migrate } from "./migrate";
 import { deliverDue, fanOut } from "./outbox";
 import { dropExpiredClicks, rollupRecent } from "./rollup";
 import { rescanLinks, safeBrowsing } from "./safe-browsing";
+import { telegramApi } from "./telegram";
 import { loadSecretKey } from "./secretbox";
 
 const config = loadConfig();
@@ -32,12 +33,29 @@ const unsafeUrls = config.safeBrowsingApiKey ? safeBrowsing(config.safeBrowsingA
 if (unsafeUrls) every(sql, "safe-browsing-rescan", 86_400_000, () => rescanLinks(sql, unsafeUrls, new Date()));
 else console.warn("SAFE_BROWSING_API_KEY is not set: link targets are not checked against Safe Browsing");
 
+// The webhook secret is derived from the token, so there is no second secret to keep.
+async function startTelegram(token: string) {
+  const api = telegramApi(token);
+  const me = (await api.call("getMe", {})) as { username: string };
+  const webhookSecret = new Bun.CryptoHasher("sha256").update(`yoy-fyi-webhook:${token}`).digest("hex");
+  await api.call("setWebhook", { url: `${config.publicOrigin}/telegram/webhook`, secret_token: webhookSecret, allowed_updates: ["message"] });
+  console.log(`telegram bot @${me.username} connected`);
+  return { api, username: me.username, webhookSecret };
+}
+const telegram = config.telegramBotToken
+  ? await startTelegram(config.telegramBotToken).catch((err) => {
+      console.error("telegram bot not started", String(err));
+      return undefined;
+    })
+  : undefined;
+
 const app = createApp({
   sql,
   publicOrigin: config.publicOrigin,
   countryOf: await loadCountryLookup(config.geoipDbPath),
   webhookKey,
   unsafeUrls,
+  telegram,
   admin: {
     email: config.adminEmail,
     sessionSecret: config.sessionSecret,

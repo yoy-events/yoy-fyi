@@ -17,6 +17,7 @@ import { type QrStyle, qrOptions, qrPng, qrSvg } from "./qr";
 import { createRateLimiter } from "./ratelimit";
 import type { UnsafeUrls } from "./safe-browsing";
 import { checkTarget } from "./target-policy";
+import { issueConnectToken } from "./telegram";
 import { type User, clearUserSession, currentUser } from "./users";
 
 const DAY = 86_400_000;
@@ -37,6 +38,8 @@ type Deps = {
   now: () => Date;
   resolveHost?: (host: string) => Promise<string[]>;
   unsafeUrls?: UnsafeUrls;
+  // The bot's username, when the Telegram bot is configured.
+  telegramBot?: string;
 };
 type Env = { Variables: { user: User } };
 
@@ -57,6 +60,7 @@ function Page({ title, user, children }: { title: string; user?: User | null; ch
           </a>
           {user && <a href="/account/keys">API keys</a>}
           {user && <a href="/account/apps">Connected apps</a>}
+          {user && <a href="/account/telegram">Telegram</a>}
           {user && (
             <form method="post" action="/logout">
               <button type="submit" class="link">
@@ -151,7 +155,7 @@ function CreateForm({ values = {}, errors = [] }: { values?: Record<string, stri
   );
 }
 
-export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUrls }: Deps) {
+export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUrls, telegramBot }: Deps) {
   const app = new Hono<Env>();
   const ownHost = new URL(publicOrigin).hostname;
   const limitCreate = createRateLimiter({ perMinute: 20 / 60, burst: 20 });
@@ -764,6 +768,46 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
       : [];
     if (!row) return c.notFound();
     return c.redirect("/account/keys", 303);
+  });
+
+  // Connecting a Telegram account to the bot: a one-time token in a t.me deep link (ADR-0006).
+  app.get("/account/telegram", async (c) => {
+    const u = c.get("user");
+    if (!telegramBot) return c.notFound();
+    const [row] = await sql`select telegram_user_id from users where id = ${u.id}`;
+    return c.html(
+      <Page title="Telegram" user={u}>
+        <h1>Telegram bot</h1>
+        <p>
+          Send a long link to <a href={`https://t.me/${telegramBot}`}>@{telegramBot}</a> and get the short yoy.fyi link and its QR back.
+        </p>
+        {row?.telegram_user_id ? (
+          <>
+            <p class="notice">Connected.</p>
+            <form method="post" action="/account/telegram/disconnect">
+              <button type="submit" class="secondary">
+                Disconnect
+              </button>
+            </form>
+          </>
+        ) : (
+          <form method="post" action="/account/telegram/connect">
+            <button type="submit">Connect Telegram</button>
+          </form>
+        )}
+      </Page>,
+    );
+  });
+
+  app.post("/account/telegram/connect", async (c) => {
+    if (!telegramBot) return c.notFound();
+    const token = await issueConnectToken(sql, c.get("user").id, now());
+    return c.redirect(`https://t.me/${telegramBot}?start=${token}`, 303);
+  });
+
+  app.post("/account/telegram/disconnect", async (c) => {
+    await sql`update users set telegram_user_id = null where id = ${c.get("user").id}`;
+    return c.redirect("/account/telegram", 303);
   });
 
   // OAuth connections from claude.ai, ChatGPT and other MCP clients to this user's service.
