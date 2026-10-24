@@ -86,11 +86,15 @@ export function telegramRoutes({ sql, publicOrigin, telegram, now, resolveHost, 
     const start = /^\/start(?:\s+([A-Za-z0-9_-]{1,64}))?$/.exec(text);
     if (start?.[1]) {
       const at = now();
-      const [claimed] = await sql`
-        update telegram_connect_tokens t set claimed_by = ${fromId}
-        from users u
-        where t.token_hash = ${sha256(start[1])} and t.used_at is null and t.expires_at > ${at} and u.id = t.user_id
-        returning u.email`;
+      // Only the latest /start can be confirmed: earlier claims by this Telegram user are dropped.
+      const [claimed] = await sql.begin(async (tx) => {
+        await tx`update telegram_connect_tokens set claimed_by = null where claimed_by = ${fromId} and used_at is null`;
+        return tx`
+          update telegram_connect_tokens t set claimed_by = ${fromId}
+          from users u
+          where t.token_hash = ${sha256(start[1])} and t.used_at is null and t.expires_at > ${at} and u.id = t.user_id
+          returning u.email`;
+      });
       if (!claimed) return reply(chatId, `This connect link has expired. Open ${publicOrigin}/account/telegram and try again.`);
       return reply(
         chatId,
@@ -101,9 +105,7 @@ export function telegramRoutes({ sql, publicOrigin, telegram, now, resolveHost, 
       const at = now();
       const [used] = await sql`
         update telegram_connect_tokens set used_at = ${at}
-        where token_hash = (select token_hash from telegram_connect_tokens
-                            where claimed_by = ${fromId} and used_at is null and expires_at > ${at}
-                            order by expires_at desc limit 1)
+        where claimed_by = ${fromId} and used_at is null and expires_at > ${at}
         returning user_id`;
       if (!used) return reply(chatId, `Nothing to confirm. Open ${publicOrigin}/account/telegram to connect.`);
       const [user] = await sql.begin(async (tx) => {

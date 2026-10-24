@@ -133,6 +133,19 @@ describe("connecting an account", () => {
     expect(await sql`select 1 from users where telegram_user_id is not null`).toHaveLength(0);
   });
 
+  test("/confirm applies to the latest /start only, even if an earlier one expires later", async () => {
+    const bob = await signIn("g-bob", "bob@example.com");
+    const bobToken = await startToken(bob);
+    now = new Date(now.getTime() + 60_000);
+    const annToken = await startToken();
+    now = new Date(now.getTime() - 60_000);
+    await update(`/start ${annToken}`);
+    await update(`/start ${bobToken}`);
+    await update("/confirm");
+    const rows = await sql`select email from users where telegram_user_id = ${TG_USER}`;
+    expect(rows.map((r: { email: string }) => r.email)).toEqual(["bob@example.com"]);
+  });
+
   test("a token claimed by one Telegram user cannot be confirmed by another", async () => {
     await update(`/start ${await startToken()}`);
     await update("/confirm", { from: 999 });
