@@ -55,10 +55,11 @@ const PREVIEW_BOTS = /TelegramBot|facebookexternalhit|Facebot|Twitterbot|LinkedI
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 
+// og:site_name is always the target's host, so a preview never hides where the link goes.
 const previewPage = (preview: Preview, shortUrl: string, location: string) => {
   const meta = (property: string, content: string | undefined) =>
     content === undefined ? "" : `<meta property="${property}" content="${escapeHtml(content)}">`;
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(preview.title)}</title>${meta("og:title", preview.title)}${meta("og:description", preview.description)}${meta("og:image", preview.image)}${meta("og:url", shortUrl)}<meta name="twitter:card" content="${preview.image ? "summary_large_image" : "summary"}"><meta http-equiv="refresh" content="0;url=${escapeHtml(location)}"></head><body><a href="${escapeHtml(location)}">${escapeHtml(preview.title)}</a></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(preview.title)}</title>${meta("og:title", preview.title)}${meta("og:description", preview.description)}${meta("og:image", preview.image)}${meta("og:url", shortUrl)}${meta("og:site_name", new URL(location).hostname)}<meta name="twitter:card" content="${preview.image ? "summary_large_image" : "summary"}"><meta http-equiv="refresh" content="0;url=${escapeHtml(location)}"></head><body><a href="${escapeHtml(location)}">${escapeHtml(preview.title)}</a></body></html>`;
 };
 
 const page = (title: string, body: string) =>

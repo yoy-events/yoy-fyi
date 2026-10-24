@@ -63,6 +63,15 @@ describe("preview in the API", () => {
   });
 });
 
+test.each([
+  ["a private address", "https://127.0.0.1/a.jpg", "private_address"],
+  ["yoy.fyi itself", "https://yoy.fyi/static/a.jpg", "own_host"],
+])("a preview image at %s is refused like a target", async (_, image, reason) => {
+  const res = await call("POST", "/v1/links", { target_url: "https://example.com/", preview: { title: "T", image } });
+  expect(res.status).toBe(422);
+  expect((await res.json()).error).toMatchObject({ code: "target_rejected", details: { reason, field: "preview.image" } });
+});
+
 describe("the short link with a preview", () => {
   beforeEach(async () => {
     await call("POST", "/v1/links", { target_url: "https://example.com/gig?x=1", code: "gig", preview: PREVIEW });
@@ -81,6 +90,7 @@ describe("the short link with a preview", () => {
     expect(html).toContain('<meta property="og:description" content="Saturday, 19:00">');
     expect(html).toContain('<meta property="og:image" content="https://cdn.example/poster.jpg">');
     expect(html).toContain('<meta property="og:url" content="https://yoy.fyi/gig">');
+    expect(html).toContain('<meta property="og:site_name" content="example.com">');
     expect(html).toContain('<meta http-equiv="refresh" content="0;url=https://example.com/gig?x=1">');
     expect((await sql`select is_bot from clicks`)[0].is_bot).toBe(true);
   });

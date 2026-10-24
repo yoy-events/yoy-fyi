@@ -203,6 +203,24 @@ async function findExisting(sql: SQL, serviceId: string, key: string | null, has
   return null;
 }
 
+// The target and the preview image pass the same policy, Safe Browsing included: bots fetch the
+// image, and a preview must not point people at what the target check would refuse.
+async function rejectedUrl(
+  body: Record<string, unknown>,
+  opts: { ownHost: string; resolveHost?: (host: string) => Promise<string[]>; unsafeUrls?: UnsafeUrls },
+) {
+  const image = (body.preview as Preview | null | undefined)?.image;
+  for (const [field, url] of [["target_url", body.target_url], ["preview.image", image]] as const) {
+    if (typeof url !== "string") continue;
+    const reason = await checkTarget(url, { ownHost: opts.ownHost, resolve: opts.resolveHost, unsafeUrls: opts.unsafeUrls });
+    if (reason) {
+      const message = field === "target_url" ? "The target URL is not allowed." : "The preview image URL is not allowed.";
+      return { kind: "error", status: 422, code: "target_rejected", message, details: field === "target_url" ? { reason } : { reason, field } } as const;
+    }
+  }
+  return null;
+}
+
 // Creates a link for a service with every rule the API applies: validation, idempotency,
 // reserved codes, the target policy and code generation. Shared by /v1 and the admin UI.
 export async function createLink(
@@ -239,16 +257,8 @@ export async function createLink(
   if (input.code && RESERVED.has(input.code.toLowerCase())) {
     return { kind: "error", status: 422, code: "code_reserved", message: `"${input.code}" is a reserved path.` };
   }
-  const rejection = await checkTarget(input.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
-  if (rejection) {
-    return {
-      kind: "error",
-      status: 422,
-      code: "target_rejected",
-      message: "The target URL is not allowed.",
-      details: { reason: rejection },
-    };
-  }
+  const rejected = await rejectedUrl(body, { ownHost, resolveHost, unsafeUrls });
+  if (rejected) return rejected;
 
   for (let attempt = 0; ; attempt++) {
     const code = input.code ?? randomBase62(7);
@@ -314,12 +324,8 @@ export async function updateLink(
   if (!link) return { kind: "error", status: 404, code: "not_found", message: "Link not found." };
   const disabled = { kind: "error", status: 409, code: "link_disabled", message: "A disabled link cannot be changed." } as const;
   if (link.disabled_at) return disabled;
-  if (typeof body.target_url === "string") {
-    const rejection = await checkTarget(body.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
-    if (rejection) {
-      return { kind: "error", status: 422, code: "target_rejected", message: "The target URL is not allowed.", details: { reason: rejection } };
-    }
-  }
+  const rejected = await rejectedUrl(body, { ownHost, resolveHost, unsafeUrls });
+  if (rejected) return rejected;
 
   const changes = { ...body, updated_at: new Date() } as Record<string, unknown>;
   if (Array.isArray(body.tags)) changes.tags = sql.array(body.tags, "text");
