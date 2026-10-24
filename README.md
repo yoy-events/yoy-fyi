@@ -30,6 +30,18 @@ const ok = await verifyWebhook(process.env.YOY_FYI_WEBHOOK_SECRET!, req.headers.
 
 Errors throw `YoyFyiError` with `status`, `code` and `details`, as described in the contract.
 
+## Use it from an AI agent (MCP)
+
+`https://yoy.fyi/mcp` is a remote MCP server with eight tools: `whoami`, `list_links`, `get_link`, `create_link`, `update_link`, `disable_link`, `get_click_timeseries` and `get_click_breakdown`. They act for the service of the key you connect with. Links created this way are marked `created_via: "mcp"`.
+
+In Claude Code, using a key with the scopes you want the agent to have:
+
+```bash
+claude mcp add --transport http yoy-fyi https://yoy.fyi/mcp --header "Authorization: Bearer $YOY_FYI_KEY"
+```
+
+OAuth sign-in for claude.ai and ChatGPT comes next ([ADR-0003](docs/adr/0003-agent-access.md)).
+
 ## Run it locally
 
 Requires Bun 1.3 and Docker.

@@ -22,7 +22,7 @@ Agents should be able to create short links and read their analytics. Roman want
 
 ### Tools
 
-Tools call the same functions as `/v1` (`createLink`, `timeseries`, `breakdown`, the link queries). Target validation, the 404-not-403 tenant rule, idempotency and rate limits are therefore identical by construction.
+Tools dispatch in-process through the `/v1` router with the caller's own credential: an in-memory `request`, not a network call. Target validation, the 404-not-403 tenant rule, idempotency, scopes and rate limits are therefore identical by construction. `created_via: "mcp"` travels as a router binding, which a client request cannot set. (The first draft said "the same functions"; dispatching through the router needs no refactor and cannot drift.)
 
 | Tool | Scope | readOnly | destructive | idempotent |
 |---|---|---|---|---|
@@ -96,7 +96,7 @@ oauth_pending       id pk, request jsonb, expires_at   -- authorize requests wai
 
 ### Delivery
 
-The CI smoke step also calls `tools/list` on `/mcp` with a test-stage key.
+The CI smoke step checks that an unauthenticated `POST /mcp` answers with the `WWW-Authenticate` resource-metadata challenge. A `tools/list` smoke with a stage key comes with slice 2, when the test stage gets one.
 
 ### Slices
 

@@ -8,6 +8,7 @@ import { type Click, describeUserAgent, insertClick, queryFields, refererHost } 
 import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
 import { keyRoutes } from "./keys";
 import { linkRoutes } from "./links";
+import { mcpRoutes } from "./mcp";
 import { createSaltSource, visitorHash } from "./salt";
 import { buildTarget } from "./target";
 import { webhookRoutes } from "./webhooks";
@@ -23,6 +24,7 @@ export type AppDeps = {
   createLimit?: RateLimit;
   webhookKey?: CryptoKey;
   admin?: AdminConfig;
+  mcpLimit?: RateLimit;
 };
 
 // The server resolves the visitor's IP once (see client-ip.ts) and passes it as `ip`.
@@ -50,6 +52,7 @@ export function createApp({
   createLimit,
   webhookKey,
   admin,
+  mcpLimit,
   countryOf,
   recordClick,
   now = () => new Date(),
@@ -96,6 +99,9 @@ export function createApp({
   v1.route("/", webhookRoutes({ sql, publicOrigin, webhookKey, resolveHost }));
   v1.route("/", linkRoutes({ sql, publicOrigin, resolveHost, createLimit }));
   app.route("/v1", v1);
+
+  app.post("/mcp", mcpRoutes({ sql, publicOrigin, v1, limit: mcpLimit }));
+  app.on(["GET", "DELETE"], "/mcp", (c) => c.json({ error: { code: "method_not_allowed", message: "POST only." } }, 405));
   if (admin) app.route("/admin", adminRoutes({ sql, publicOrigin, admin, now, resolveHost }));
 
   app.get("/:code", async (c) => {
