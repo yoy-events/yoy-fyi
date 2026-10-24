@@ -4,7 +4,6 @@ import type { SQL } from "bun";
 import { type Context, Hono } from "hono";
 import { csrf } from "hono/csrf";
 import type { Child } from "hono/jsx";
-import QRCode from "qrcode";
 import { type AdminConfig, startGoogle } from "./admin/auth";
 import { BarChart, Ranking } from "./admin/charts";
 import { linkBody, previewFrom } from "./admin/links";
@@ -12,6 +11,7 @@ import { timeseries, breakdown } from "./analytics";
 import { isUuid } from "./http";
 import { type Scope, issueKey } from "./keys";
 import { type LinkRow, createLink, toLink, updateLink } from "./links";
+import { type QrStyle, qrOptions, qrPng, qrSvg } from "./qr";
 import { createRateLimiter } from "./ratelimit";
 import type { UnsafeUrls } from "./safe-browsing";
 import { checkTarget } from "./target-policy";
@@ -326,6 +326,13 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
 
   async function linkPage(c: Context, u: User, row: LinkRow, form?: { values: Record<string, string>; errors: string[] }, status: 200 | 409 | 422 = 200) {
     const link = toLink(row, publicOrigin, now());
+    // QR style from the page's own query; the image and downloads carry the same choices.
+    const query = new URL(c.req.url).searchParams;
+    const parsed = qrOptions(query);
+    const qrError = "error" in parsed ? parsed.error : null;
+    const style = "error" in parsed ? (qrOptions(new URLSearchParams()) as QrStyle) : parsed;
+    const styled = !qrError && ["fg", "bg", "caption"].some((k) => query.get(k));
+    const qrQuery = styled ? `?${new URLSearchParams({ fg: style.fg, bg: style.bg, ...(style.caption ? { caption: style.caption } : {}) })}` : "";
     const values = form?.values ?? {
       target_url: row.target_url,
       title: row.title ?? "",
@@ -372,11 +379,42 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           <span class={`badge ${link.status}`}>{link.status}</span>
           {link.tags.length > 0 && <span class="meta"> · {link.tags.join(", ")}</span>}
         </p>
-        <img src={`/links/${link.id}/qr.svg`} alt={`QR code for ${link.short_url}`} class="qr" width="160" height="160" />
+        <img src={`/links/${link.id}/qr.svg${qrQuery}`} alt={`QR code for ${link.short_url}`} class="qr" width="160" height="160" />
         <p>
-          Download QR: <a href={`/links/${link.id}/qr.png`} download={`${link.code}.png`}>PNG</a> ·{" "}
-          <a href={`/links/${link.id}/qr.svg`} download={`${link.code}.svg`}>SVG</a>
+          Download QR:{" "}
+          {!style.caption && (
+            <>
+              <a href={`/links/${link.id}/qr.png${qrQuery}`} download={`${link.code}.png`}>
+                PNG
+              </a>{" "}
+              ·{" "}
+            </>
+          )}
+          <a href={`/links/${link.id}/qr.svg${qrQuery}`} download={`${link.code}.svg`}>
+            SVG
+          </a>
         </p>
+        <details open={!!qrQuery || !!qrError}>
+          <summary>QR colours and caption</summary>
+          <form method="get" action={`/links/${link.id}`} class="stack card">
+            {qrError && <p class="notice">{qrError}</p>}
+            <div class="row">
+              <label>
+                Code <input type="color" name="fg" value={style.fg} />
+              </label>
+              <label>
+                Background <input type="color" name="bg" value={style.bg} />
+              </label>
+            </div>
+            <label>
+              Caption under the code <span class="meta">SVG only, up to 40 characters</span>
+              <input name="caption" maxlength={40} value={style.caption ?? ""} placeholder="Scan me" />
+            </label>
+            <button type="submit" class="secondary">
+              Apply
+            </button>
+          </form>
+        </details>
         <h2>
           {daily.totals.clicks} clicks in 30 days <span class="meta">({daily.totals.uniques_upper_bound} visitors at most)</span>
         </h2>
@@ -476,14 +514,18 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   app.get("/links/:id/qr.svg", async (c) => {
     const row = await ownLink(c.get("user"), c.req.param("id"));
     if (!row) return c.notFound();
-    return c.body(await QRCode.toString(`${publicOrigin}/${row.code}`, { type: "svg", margin: 2 }), 200, { "Content-Type": "image/svg+xml" });
+    const style = qrOptions(new URL(c.req.url).searchParams);
+    if ("error" in style) return c.text(style.error, 400);
+    return c.body(await qrSvg(`${publicOrigin}/${row.code}`, style), 200, { "Content-Type": "image/svg+xml" });
   });
 
   app.get("/links/:id/qr.png", async (c) => {
     const row = await ownLink(c.get("user"), c.req.param("id"));
     if (!row) return c.notFound();
-    const png = await QRCode.toBuffer(`${publicOrigin}/${row.code}`, { type: "png", width: 1024, margin: 2 });
-    return c.body(new Uint8Array(png), 200, { "Content-Type": "image/png" });
+    const style = qrOptions(new URL(c.req.url).searchParams);
+    if ("error" in style) return c.text(style.error, 400);
+    if (style.caption) return c.text("A caption is available in the SVG only", 400);
+    return c.body(await qrPng(`${publicOrigin}/${row.code}`, style), 200, { "Content-Type": "image/png" });
   });
 
   app.post("/links/:id/disable", async (c) => {

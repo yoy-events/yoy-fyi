@@ -229,3 +229,29 @@ describe("links for channels", () => {
     expect((await sql`select utm_source, utm_medium from clicks`)[0]).toEqual({ utm_source: "telegram", utm_medium: "social" });
   });
 });
+
+describe("styled QR downloads", () => {
+  test("the SVG and PNG take colours; the SVG takes a caption", async () => {
+    const svg = await get(`/links/${id}/qr.svg?fg=%23112233&bg=%23ffeecc&caption=Scan%20me`);
+    expect(svg.status).toBe(200);
+    const text = await svg.text();
+    expect(text).toContain('stroke="#112233"');
+    expect(text).toContain(">Scan me</text>");
+    const png = await get(`/links/${id}/qr.png?fg=%23112233&bg=%23ffeecc`);
+    expect(png.headers.get("content-type")).toBe("image/png");
+  });
+
+  test.each(["qr.svg?fg=red", "qr.png?fg=%23eeeeee", "qr.svg?caption=" + "c".repeat(41), "qr.png?caption=Scan"])(
+    "%s is 400",
+    async (path) => {
+      expect((await get(`/links/${id}/${path}`)).status).toBe(400);
+    },
+  );
+
+  test("the link page has a style form whose choices carry into the preview and downloads", async () => {
+    const html = await (await get(`/links/${id}?fg=%23112233&caption=Scan`)).text();
+    expect(html).toContain('name="fg"');
+    expect(html).toContain(`src="/links/${id}/qr.svg?fg=%23112233&amp;bg=%23ffffff&amp;caption=Scan"`);
+    expect(html).not.toContain(`/links/${id}/qr.png?fg=%23112233`);
+  });
+});
