@@ -834,6 +834,7 @@ components:
         - created_at
         - updated_at
         - disabled_at
+        - created_via
       properties:
         id: { type: string, format: uuid }
         code: { $ref: '#/components/schemas/Code' }
@@ -860,6 +861,11 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         disabled_at: { type: [string, 'null'], format: date-time }
+        created_via:
+          type: string
+          enum: [api, admin, mcp]
+          readOnly: true
+          description: Where the link was created. `mcp` marks links created by AI agents over `/mcp`.
 
     Timeseries:
       type: object

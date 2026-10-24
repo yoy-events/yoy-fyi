@@ -130,7 +130,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost }: Deps) {
     if (!service) return c.notFound();
     const values = Object.fromEntries(Object.entries(await c.req.parseBody()).map(([k, v]) => [k, String(v).trim()]));
 
-    const result = await createLink(sql, { ownHost, resolveHost }, service.id, linkBody(values));
+    const result = await createLink(sql, { ownHost, resolveHost }, service.id, linkBody(values), null, "admin");
     if (result.kind !== "error") return c.redirect(`/admin/links/${result.row.id}`, 303);
 
     const fields = (result.details?.fields ?? {}) as Record<string, string>;

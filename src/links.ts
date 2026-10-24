@@ -16,7 +16,7 @@ import { type RateLimit, createRateLimiter } from "./ratelimit";
 import { checkTarget } from "./target-policy";
 
 // System paths that can never be link codes, compared case-insensitively.
-const RESERVED = new Set(["v1", "admin", "health", "qr", "static", "openapi", "robots", "favicon"]);
+const RESERVED = new Set(["v1", "admin", "health", "qr", "static", "openapi", "robots", "favicon", "mcp", "oauth"]);
 const CODE = /^[A-Za-z0-9_-]{1,64}$/;
 const TAG = /^[a-z0-9][a-z0-9_:.-]{0,39}$/;
 const UTM_KEYS = new Set(["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]);
@@ -37,7 +37,10 @@ export type LinkRow = {
   created_at: Date;
   updated_at: Date;
   disabled_at: Date | null;
+  created_via: CreatedVia;
 };
+
+export type CreatedVia = "api" | "admin" | "mcp";
 
 export type LinkInput = {
   target_url: string;
@@ -136,6 +139,7 @@ export function toLink(row: LinkRow, publicOrigin: string, now = new Date()) {
     created_at: row.created_at,
     updated_at: row.updated_at,
     disabled_at: row.disabled_at,
+    created_via: row.created_via,
   };
 }
 
@@ -189,6 +193,7 @@ export async function createLink(
   serviceId: string,
   body: Record<string, unknown>,
   idempotencyKey: string | null = null,
+  createdVia: CreatedVia = "api",
 ): Promise<CreateResult> {
   const fields = validateLinkCreate(body, new Date());
   if (Object.keys(fields).length) {
@@ -232,12 +237,13 @@ export async function createLink(
     try {
       const [row]: LinkRow[] = await sql`
         insert into links (id, service_id, code, target_url, title, tags, utm_defaults, pass_click_id,
-                           expires_at, ext_service, ext_entity_type, ext_entity_id, idempotency_key, idempotency_hash)
+                           expires_at, ext_service, ext_entity_type, ext_entity_id, idempotency_key, idempotency_hash,
+                           created_via)
         values (${Bun.randomUUIDv7()}, ${serviceId}, ${code}, ${input.target_url}, ${input.title ?? null},
                 ${sql.array(input.tags ?? [], "text")}, ${input.utm_defaults ?? null}, ${input.pass_click_id ?? false},
                 ${input.expires_at ?? null}, ${input.external_ref?.service ?? null},
                 ${input.external_ref?.entity_type ?? null}, ${input.external_ref?.entity_id ?? null},
-                ${idempotencyKey}, ${idempotencyKey ? hash : null})
+                ${idempotencyKey}, ${idempotencyKey ? hash : null}, ${createdVia})
         returning *`;
       return { kind: "created", row: row! };
     } catch (err) {
@@ -261,8 +267,12 @@ type Deps = {
   createLimit?: RateLimit;
 };
 
+// The MCP endpoint dispatches into these routes in-process and sets `createdVia` as a binding,
+// which a client request cannot set.
+type LinkEnv = AuthEnv & { Bindings: { createdVia?: CreatedVia } };
+
 export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { perMinute: 60, burst: 20 } }: Deps) {
-  const app = new Hono<AuthEnv>();
+  const app = new Hono<LinkEnv>();
   const ownHost = new URL(publicOrigin).hostname;
   const limitCreate = createRateLimiter(createLimit);
 
@@ -282,7 +292,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
     }
     const body = await readJsonObject(c);
     if (!body) return apiError(c, 400, "invalid_request", "Body must be a JSON object.");
-    const result = await createLink(sql, { ownHost, resolveHost }, caller.serviceId, body, idempotencyKey);
+    const result = await createLink(sql, { ownHost, resolveHost }, caller.serviceId, body, idempotencyKey, c.env?.createdVia);
     if (result.kind === "error") return apiError(c, result.status, result.code, result.message, result.details);
     if (result.kind === "created") c.header("Location", `/v1/links/${result.row.id}`);
     return c.json(toLink(result.row, publicOrigin), result.kind === "created" ? 201 : 200);
