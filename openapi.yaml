@@ -19,7 +19,7 @@ info:
 servers:
   - url: https://yoy.fyi
     description: Production
-  - url: https://yoy-fyi-test.fly.dev
+  - url: https://test.yoy.fyi
     description: Test app (latest PR)
 security:
   - apiKey: []

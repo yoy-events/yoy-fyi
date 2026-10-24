@@ -29,6 +29,7 @@ export type AppDeps = {
 type Env = { Bindings: { ip?: string } };
 
 const CODE = /^[A-Za-z0-9_-]{1,64}$/;
+const spec = Bun.YAML.parse(await Bun.file(new URL("../openapi.yaml", import.meta.url).pathname).text());
 
 type LinkRow = {
   id: string;
@@ -84,6 +85,9 @@ export function createApp({
   );
 
   app.get("/health", (c) => c.json({ ok: true }));
+
+  // The contract is public, so agents and generators can read it without a key.
+  app.get("/v1/openapi.json", (c) => c.json(spec));
 
   const v1 = new Hono();
   v1.use(requireKey(sql));
