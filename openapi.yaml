@@ -863,9 +863,9 @@ components:
         disabled_at: { type: [string, 'null'], format: date-time }
         created_via:
           type: string
-          enum: [api, admin, mcp]
+          enum: [api, admin, mcp, web]
           readOnly: true
-          description: Where the link was created. `mcp` marks links created by AI agents over `/mcp`.
+          description: Where the link was created. `mcp` marks links created by AI agents over `/mcp`, `web` links created on the yoy.fyi home page.
 
     Timeseries:
       type: object

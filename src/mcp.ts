@@ -47,7 +47,7 @@ const LINK = {
     title: { type: ["string", "null"] },
     tags: { type: "array", items: str },
     status: { enum: ["active", "expired", "disabled"] },
-    created_via: { enum: ["api", "admin", "mcp"] },
+    created_via: { enum: ["api", "admin", "mcp", "web"] },
   },
 };
 const RANGE = {

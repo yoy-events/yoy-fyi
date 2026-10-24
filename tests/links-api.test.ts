@@ -257,6 +257,16 @@ describe("create rate limit", () => {
     expect(await errorCode(res)).toBe("rate_limited");
     expect(res.headers.get("retry-after")).toBe("1");
   });
+
+  test("the limit is per service, so extra keys do not raise it", async () => {
+    const limited = appWith({ createLimit: { perMinute: 60, burst: 2 } });
+    const { token: second } = await issueKey(sql, { serviceSlug: "yoy", name: "second", scopes: ["links:write"] });
+    const post = (key: string) => call("POST", "/v1/links", { target_url: "https://example.com/" }, {}, limited, key);
+
+    await post(token);
+    await post(token);
+    expect((await post(second)).status).toBe(429);
+  });
 });
 
 describe("GET /v1/links/{id}", () => {

@@ -9,6 +9,7 @@ import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
 import { keyRoutes } from "./keys";
 import { linkRoutes } from "./links";
 import { mcpRoutes } from "./mcp";
+import { webRoutes } from "./web";
 import { type FetchClientMetadata, fetchClientMetadata, oauthRoutes } from "./oauth";
 import { createSaltSource, visitorHash } from "./salt";
 import { buildTarget } from "./target";
@@ -88,7 +89,10 @@ export function createApp({
   const oauthHeaders = headers({ styleSrc: ["'self'"] });
   app.use((c, next) => {
     const path = c.req.path;
-    if (path.startsWith("/admin")) return adminHeaders(c, next);
+    // The personal pages (ADR-0004) load the same stylesheet and QR images and post forms like the admin.
+    if (path.startsWith("/admin") || path === "/" || /^\/(links|account|privacy|terms|login|logout)(\/|$)/.test(path)) {
+      return adminHeaders(c, next);
+    }
     return path.startsWith("/oauth") ? oauthHeaders(c, next) : publicHeaders(c, next);
   });
 
@@ -112,6 +116,7 @@ export function createApp({
 
   app.post("/mcp", mcpRoutes({ sql, publicOrigin, v1, now, limit: mcpLimit }));
   if (admin) {
+    app.route("/", webRoutes({ sql, publicOrigin, admin, now, resolveHost }));
     const ownHost = new URL(publicOrigin).hostname;
     const metadata = clientMetadata ?? fetchClientMetadata({ ownHost, resolveHost });
     app.route("/", oauthRoutes({ sql, publicOrigin, admin, now, clientMetadata: metadata }));
