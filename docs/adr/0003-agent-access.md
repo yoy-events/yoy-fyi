@@ -41,7 +41,8 @@ Tools dispatch in-process through the `/v1` router with the caller's own credent
 
 ### Credentials
 
-- `/mcp` accepts both an existing `yfi_` API key and a new OAuth access token `yfo_<prefix>_<secret>`. Both resolve to `(service_id, scopes)`, are stored as sha256 hashes and are compared in constant time.
+- `/mcp` accepts both an existing `yfi_` API key and a new OAuth access token `yfo_<43 random base64url>` (refresh tokens are `yfr_…`). Both resolve to `(service_id, scopes)`. OAuth tokens are stored only as sha256 hashes and looked up by hash.
+- `/v1` never accepts `yfo_` tokens: their audience is `/mcp`. Tools reach `/v1` in-process with the resolved caller as a router binding.
 - OAuth can grant only `links:read`, `links:write` and `analytics:read`. `keys:manage` and `webhooks:manage` are never grantable through OAuth.
 - A call with no token gets 401 with `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp"`. A call missing a scope gets 403 `insufficient_scope`, listing every required scope in one challenge.
 
@@ -52,11 +53,8 @@ Tools dispatch in-process through the `/v1` router with the caller's own credent
   - `/.well-known/oauth-authorization-server` contains `S256` only, `token_endpoint_auth_methods_supported: ["none"]`, `client_id_metadata_document_supported: true` and `authorization_response_iss_parameter_supported: true`.
 - **Client registration.** Client ID Metadata Documents only; no dynamic registration.
   - The `client_id` URL is fetched through the webhook SSRF guard: https on port 443, public addresses only, 5 s timeout and a 64 KB cap. The result is cached in `oauth_clients`.
-  - The `client_id` host must be on an allowlist, starting with the Claude and ChatGPT hosts. The exact hosts are confirmed on the first real connect.
-  - Only redirect URIs declared in the document are accepted:
-    - `https://claude.ai/api/mcp/auth_callback`
-    - loopback `localhost`/`127.0.0.1` on any port, for Claude Code
-    - `https://chatgpt.com/connector_platform_oauth_redirect`
+  - The `client_id` host must be on an allowlist of registrable domains: `claude.ai`, `claude.com`, `anthropic.com`, `chatgpt.com`, `openai.com`. A refused host is logged, so a new legitimate one shows up before it is added.
+  - Only redirect URIs the document declares are accepted, compared exactly. Loopback redirects (`localhost`, `127.0.0.1`) match on any port, for Claude Code. Expected: `https://claude.ai/api/mcp/auth_callback` and `https://chatgpt.com/connector_platform_oauth_redirect`.
 - **`GET /oauth/authorize`.**
   - Requires the admin session. Without one, the request is stored server-side and the magic-link login resumes it after sign-in.
   - The consent page shows the client name and the redirect host. Roman picks **one service** and ticks scopes; `links:write` starts unticked.

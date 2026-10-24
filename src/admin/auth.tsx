@@ -1,7 +1,9 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import { isUuid } from "../http";
 import { createRateLimiter, rateLimitKey } from "../ratelimit";
 import { Layout } from "./layout";
 
@@ -22,13 +24,31 @@ const sha256 = (s: string) => new Bun.CryptoHasher("sha256").update(s).digest("h
 
 // The session is a signed cookie holding the admin email and an expiry. There is one admin,
 // so nothing server-side is needed to look it up.
-export function requireAdmin({ admin, now }: Pick<Deps, "admin" | "now">) {
+export async function adminSignedIn(c: Context, { admin, now }: Pick<Deps, "admin" | "now">): Promise<boolean> {
+  const value = await getSignedCookie(c, admin.sessionSecret, COOKIE, "host");
+  const [email, expires] = typeof value === "string" ? value.split("|") : [];
+  return email === admin.email && Number(expires) > now().getTime();
+}
+
+export function requireAdmin(deps: Pick<Deps, "admin" | "now">) {
   return createMiddleware(async (c, next) => {
-    const value = await getSignedCookie(c, admin.sessionSecret, COOKIE, "host");
-    const [email, expires] = typeof value === "string" ? value.split("|") : [];
-    if (email !== admin.email || !(Number(expires) > now().getTime())) return c.redirect("/admin/login", 302);
+    if (!(await adminSignedIn(c, deps))) return c.redirect("/admin/login", 302);
     await next();
   });
+}
+
+// `pending` is an OAuth authorize request to return to after signing in.
+export function LoginForm({ pending }: { pending?: string }) {
+  return (
+    <form method="post" action="/admin/login" class="stack">
+      {pending && <input type="hidden" name="pending" value={pending} />}
+      <label>
+        Email
+        <input type="email" name="email" required autocomplete="email" />
+      </label>
+      <button type="submit">Email me a sign-in link</button>
+    </form>
+  );
 }
 
 export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
@@ -39,13 +59,7 @@ export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
     <Layout title="Sign in">
       <h1>Sign in</h1>
       {message && <p class="notice">{message}</p>}
-      <form method="post" action="/admin/login" class="stack">
-        <label>
-          Email
-          <input type="email" name="email" required autocomplete="email" />
-        </label>
-        <button type="submit">Email me a sign-in link</button>
-      </form>
+      <LoginForm />
     </Layout>
   );
 
@@ -56,11 +70,13 @@ export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
     const ip = c.env?.ip;
     if (ip && !limitLogin(rateLimitKey(ip)).ok) return c.html(loginPage("Too many attempts. Try again later."), 429);
 
-    const email = String((await c.req.parseBody()).email ?? "").trim().toLowerCase();
+    const form = await c.req.parseBody();
+    const email = String(form.email ?? "").trim().toLowerCase();
+    const pending = isUuid(String(form.pending ?? "")) ? String(form.pending) : null;
     if (email === admin.email.toLowerCase()) {
       const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
-      await sql`insert into admin_login_tokens (token_hash, expires_at)
-                values (${sha256(token)}, ${new Date(now().getTime() + TOKEN_TTL_MS)})`;
+      await sql`insert into admin_login_tokens (token_hash, expires_at, pending_id)
+                values (${sha256(token)}, ${new Date(now().getTime() + TOKEN_TTL_MS)}, ${pending})`;
       await admin.sendEmail({
         to: admin.email,
         subject: "Sign in to yoy.fyi",
@@ -94,7 +110,7 @@ export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
     const [used] = await sql`
       update admin_login_tokens set used_at = ${at}
       where token_hash = ${sha256(token)} and used_at is null and expires_at > ${at}
-      returning token_hash`;
+      returning pending_id`;
     if (!used) {
       return c.html(
         <Layout title="Link expired">
@@ -113,7 +129,7 @@ export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
       path: "/",
       maxAge: SESSION_TTL_MS / 1000,
     });
-    return c.redirect("/admin", 303);
+    return c.redirect(used.pending_id ? `/oauth/authorize?pending=${used.pending_id}` : "/admin", 303);
   });
 
   app.post("/logout", (c) => {

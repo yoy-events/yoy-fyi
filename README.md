@@ -40,7 +40,7 @@ In Claude Code, using a key with the scopes you want the agent to have:
 claude mcp add --transport http yoy-fyi https://yoy.fyi/mcp --header "Authorization: Bearer $YOY_FYI_KEY"
 ```
 
-OAuth sign-in for claude.ai and ChatGPT comes next ([ADR-0003](docs/adr/0003-agent-access.md)).
+In claude.ai or ChatGPT, add a custom connector with the URL `https://yoy.fyi/mcp`. The app sends you to yoy.fyi to sign in with the admin email link. There you pick one service and the permissions to grant: creating, changing and disabling links starts unticked. Connections are listed under **Connected apps** in `/admin`, where each can be revoked. See [ADR-0003](docs/adr/0003-agent-access.md).
 
 ## Run it locally
 

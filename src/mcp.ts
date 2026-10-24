@@ -4,11 +4,12 @@
 import type { SQL } from "bun";
 import type { Context } from "hono";
 import { type Caller, authenticate } from "./keys";
+import { authenticateOAuth } from "./oauth";
 import { type RateLimit, createRateLimiter } from "./ratelimit";
 
 // The /v1 router; only its in-process `request` is used.
-type V1 = { request: (url: string, init: RequestInit, env: { createdVia: "mcp" }) => Response | Promise<Response> };
-type Deps = { sql: SQL; publicOrigin: string; v1: V1; limit?: RateLimit };
+type V1 = { request: (url: string, init: RequestInit, env: { createdVia: "mcp"; caller: Caller }) => Response | Promise<Response> };
+type Deps = { sql: SQL; publicOrigin: string; v1: V1; now: () => Date; limit?: RateLimit };
 
 // Newest first; an unknown requested version gets the newest.
 const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18"];
@@ -20,12 +21,14 @@ type Api = (method: string, path: string, opts?: { query?: Json; body?: Json; he
 
 type Tool = {
   name: string;
+  scope: string | null; // the OAuth scope the tool needs; null = any
+
   title: string;
   description: string;
   annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: false };
   inputSchema: Json;
   outputSchema: Json;
-  run: (args: Json, api: Api) => Promise<ToolResult>;
+  run: (args: Json, api: Api, caller: Caller & { sql: SQL }) => Promise<ToolResult>;
 };
 
 const toolError = (text: string): ToolResult => ({ isError: true, content: [{ type: "text", text }] });
@@ -72,6 +75,7 @@ const id = (args: Json) => (typeof args.id === "string" && args.id ? encodeURICo
 const TOOLS: Tool[] = [
   {
     name: "whoami",
+    scope: null,
     title: "Show the connected service",
     description: "Returns the yoy.fyi service this connection acts for and the scopes it holds.",
     annotations: READ,
@@ -81,16 +85,16 @@ const TOOLS: Tool[] = [
       required: ["service", "scopes"],
       properties: { service: { type: "object" }, scopes: { type: "array", items: str } },
     },
-    run: async (_, api) => {
-      const me = await api("GET", "/me");
-      if (me.isError) return me;
-      const { service, key } = me.structuredContent as { service: Json; key: { scopes: string[] } };
-      const data = { service, scopes: key.scopes };
+    // Answered from the caller itself: an OAuth grant has no API-key row for /v1/me to show.
+    run: async (_, __, { sql, serviceId, scopes }) => {
+      const [service] = await sql`select id, slug, name from services where id = ${serviceId}`;
+      const data = { service, scopes };
       return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
     },
   },
   {
     name: "list_links",
+    scope: "links:read",
     title: "List short links",
     description: "Lists this service's short links, newest first, with optional filters. Returns next_cursor for the next page.",
     annotations: READ,
@@ -126,6 +130,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "get_link",
+    scope: "links:read",
     title: "Get a short link",
     description: "Returns one short link of this service, looked up by id or by code (exactly one of them).",
     annotations: READ,
@@ -143,6 +148,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "create_link",
+    scope: "links:write",
     title: "Create a short link",
     description:
       "Creates a yoy.fyi short link to target_url for this service. Repeating a call with the same idempotency_key, or the same external_ref, returns the existing link instead of creating another.",
@@ -171,6 +177,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "update_link",
+    scope: "links:write",
     title: "Update a short link",
     description:
       "Changes a short link's target_url, title, tags, utm_defaults, pass_click_id or expires_at. A new target_url changes where an existing, possibly already shared link goes.",
@@ -189,6 +196,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "disable_link",
+    scope: "links:write",
     title: "Disable a short link",
     description: "Disables a short link: it then answers 410 to visitors. Its code is never reused.",
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
@@ -199,6 +207,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "get_click_timeseries",
+    scope: "analytics:read",
     title: "Get clicks over time",
     description: "Returns click and unique-visitor counts per UTC hour or day. Hourly ranges are limited to 7 days here.",
     annotations: READ,
@@ -223,6 +232,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "get_click_breakdown",
+    scope: "analytics:read",
     title: "Get top click sources",
     description:
       "Returns the top values of one dimension (referer_host, utm_source, utm_medium, utm_campaign, country, device, browser, os) with click counts.",
@@ -247,17 +257,21 @@ const TOOLS: Tool[] = [
   },
 ];
 
-const listed = TOOLS.map(({ run: _, ...tool }) => tool);
+// securitySchemes tells ChatGPT which OAuth scope each tool needs.
+const listed = TOOLS.map(({ run: _, scope, ...tool }) => ({
+  ...tool,
+  securitySchemes: [{ type: "oauth2", scopes: scope ? [scope] : [] }],
+}));
 
 const rpcError = (c: Context, status: 200 | 400, id: unknown, code: number, message: string) =>
   c.json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } }, status);
 
-export function mcpRoutes({ sql, publicOrigin, v1, limit = { perMinute: 120, burst: 60 } }: Deps) {
+export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120, burst: 60 } }: Deps) {
   const limitCalls = createRateLimiter(limit);
   const resourceMetadata = `${publicOrigin}/.well-known/oauth-protected-resource/mcp`;
 
   const apiFor =
-    (authorization: string): Api =>
+    (caller: Caller): Api =>
     async (method, path, opts = {}) => {
       // The /v1 router is mounted at /v1, so its own routes start at "/".
       const url = new URL(`${publicOrigin}${path}`);
@@ -266,10 +280,10 @@ export function mcpRoutes({ sql, publicOrigin, v1, limit = { perMinute: 120, bur
         url.toString(),
         {
           method,
-          headers: { authorization, "content-type": "application/json", ...opts.headers },
+          headers: { "content-type": "application/json", ...opts.headers },
           body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
         },
-        { createdVia: "mcp" },
+        { createdVia: "mcp", caller },
       );
       const json = (await res.json()) as Json;
       if (!res.ok) {
@@ -285,7 +299,7 @@ export function mcpRoutes({ sql, publicOrigin, v1, limit = { perMinute: 120, bur
     if (origin && origin !== publicOrigin) return c.json({ error: { code: "forbidden", message: "Origin not allowed." } }, 403);
 
     const authorization = c.req.header("authorization") ?? "";
-    const caller: Caller | null = await authenticate(sql, authorization);
+    const caller: Caller | null = (await authenticateOAuth(sql, authorization, now())) ?? (await authenticate(sql, authorization));
     if (!caller) {
       c.header("WWW-Authenticate", `Bearer resource_metadata="${resourceMetadata}"`);
       return c.json({ error: { code: "unauthorized", message: "Missing, unknown or revoked credential." } }, 401);
@@ -327,7 +341,7 @@ export function mcpRoutes({ sql, publicOrigin, v1, limit = { perMinute: 120, bur
         const args = params?.arguments ?? {};
         if (!tool) return rpcError(c, 200, reqId, -32602, `Unknown tool: ${String(params?.name)}`);
         if (typeof args !== "object" || Array.isArray(args)) return rpcError(c, 200, reqId, -32602, "arguments must be an object");
-        const result = await tool.run(args as Json, apiFor(authorization));
+        const result = await tool.run(args as Json, apiFor(caller), { ...caller, sql });
         console.log(JSON.stringify({ mcp: tool.name, service: caller.serviceId, ok: !result.isError }));
         return ok(result);
       }

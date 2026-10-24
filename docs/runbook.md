@@ -90,6 +90,13 @@ The runner has the single label `yoy-fyi`. To re-register it, get a registration
 - The VM's local IP changes on every boot (Hyper-V Default Switch). Use the Tailscale address.
 - Power or internet loss takes every short link down until it returns. There is no failover.
 
+## Agent access (MCP and OAuth)
+
+- `/mcp` accepts API keys and OAuth access tokens. OAuth discovery lives at `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`.
+- **Connected apps** in `/admin` lists every OAuth connection with a Revoke button. Revoking ends the access and refresh tokens at once.
+- A client whose metadata host is not on the allowlist is refused, and the app logs `oauth client host refused` with the host. Add the domain to `CLIENT_HOSTS` in `src/oauth.tsx` only if it belongs to a real client.
+- To find and disable everything agents created: `select id, code, target_url from links where created_via = 'mcp'`, then disable through the admin or `/v1`.
+
 ## Backups
 
 None yet. This is accepted in ADR-0002 as a separate decision for later. Losing the VM disk loses every link and click.

@@ -9,6 +9,7 @@ import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
 import { keyRoutes } from "./keys";
 import { linkRoutes } from "./links";
 import { mcpRoutes } from "./mcp";
+import { type FetchClientMetadata, fetchClientMetadata, oauthRoutes } from "./oauth";
 import { createSaltSource, visitorHash } from "./salt";
 import { buildTarget } from "./target";
 import { webhookRoutes } from "./webhooks";
@@ -25,6 +26,7 @@ export type AppDeps = {
   webhookKey?: CryptoKey;
   admin?: AdminConfig;
   mcpLimit?: RateLimit;
+  clientMetadata?: FetchClientMetadata;
 };
 
 // The server resolves the visitor's IP once (see client-ip.ts) and passes it as `ip`.
@@ -53,6 +55,7 @@ export function createApp({
   webhookKey,
   admin,
   mcpLimit,
+  clientMetadata,
   countryOf,
   recordClick,
   now = () => new Date(),
@@ -80,7 +83,14 @@ export function createApp({
   const publicHeaders = headers({});
   // Admin pages load their stylesheet and QR images from this origin and post forms to it.
   const adminHeaders = headers({ styleSrc: ["'self'"], imgSrc: ["'self'"], formAction: ["'self'"] });
-  app.use((c, next) => (c.req.path.startsWith("/admin") ? adminHeaders(c, next) : publicHeaders(c, next)));
+  // The OAuth consent form redirects to claude.ai or chatgpt.com after its POST, and Chrome
+  // applies form-action to that redirect, so this page sets no form-action at all.
+  const oauthHeaders = headers({ styleSrc: ["'self'"] });
+  app.use((c, next) => {
+    const path = c.req.path;
+    if (path.startsWith("/admin")) return adminHeaders(c, next);
+    return path.startsWith("/oauth") ? oauthHeaders(c, next) : publicHeaders(c, next);
+  });
 
   const adminCss = Bun.file(new URL("./admin/admin.css", import.meta.url).pathname);
   app.get("/static/admin.css", (c) =>
@@ -100,7 +110,12 @@ export function createApp({
   v1.route("/", linkRoutes({ sql, publicOrigin, resolveHost, createLimit }));
   app.route("/v1", v1);
 
-  app.post("/mcp", mcpRoutes({ sql, publicOrigin, v1, limit: mcpLimit }));
+  app.post("/mcp", mcpRoutes({ sql, publicOrigin, v1, now, limit: mcpLimit }));
+  if (admin) {
+    const ownHost = new URL(publicOrigin).hostname;
+    const metadata = clientMetadata ?? fetchClientMetadata({ ownHost, resolveHost });
+    app.route("/", oauthRoutes({ sql, publicOrigin, admin, now, clientMetadata: metadata }));
+  }
   app.on(["GET", "DELETE"], "/mcp", (c) => c.json({ error: { code: "method_not_allowed", message: "POST only." } }, 405));
   if (admin) app.route("/admin", adminRoutes({ sql, publicOrigin, admin, now, resolveHost }));
 
