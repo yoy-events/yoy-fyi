@@ -2,6 +2,8 @@
 
 Short links and click analytics for YOY, Diduny, mnfaktr and other services. `https://yoy.fyi/{code}` redirects and records the click. Services create links and read analytics through `/v1`. Webhooks report each click, and `/admin` is a small dashboard.
 
+Anyone can sign in at <https://yoy.fyi> with Google to create their own short links, download QR codes, see clicks, and create API keys for their links under **API keys** ([ADR-0004](docs/adr/0004-user-accounts.md)).
+
 - Contract: [`openapi.yaml`](openapi.yaml), also served at <https://yoy.fyi/v1/openapi.json>
 - Architecture: [ADR-0001](docs/adr/0001-architecture.md) and [ADR-0002](docs/adr/0002-home-hosting.md) (hosting)
 - Operations: [runbook](docs/runbook.md)

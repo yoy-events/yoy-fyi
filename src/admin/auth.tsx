@@ -5,6 +5,7 @@ import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { isUuid } from "../http";
 import { createRateLimiter, rateLimitKey } from "../ratelimit";
+import { setUserSession, upsertGoogleUser } from "../users";
 import { Layout } from "./layout";
 
 export type GoogleSignIn = {
@@ -86,6 +87,41 @@ const setSession = (c: Context, admin: AdminConfig, at: Date) =>
 
 const afterSignIn = (pending: string | null | undefined) => (pending ? `/oauth/authorize?pending=${pending}` : "/admin");
 
+// One Google client and one callback serve both sign-ins: `admin` for /admin (ADMIN_EMAIL only)
+// and `user` for the personal home page (any verified Google account, ADR-0004).
+export async function startGoogle(
+  c: Context,
+  { publicOrigin, admin, now }: Pick<Deps, "publicOrigin" | "admin" | "now">,
+  kind: "admin" | "user",
+  pending: string | null = null,
+) {
+  const google = admin.google!;
+  const flow = { kind, state: random(), verifier: random(), nonce: random(), pending, exp: now().getTime() + GOOGLE_FLOW_TTL_MS };
+  await setSignedCookie(c, GOOGLE_COOKIE, Buffer.from(JSON.stringify(flow)).toString("base64url"), admin.sessionSecret, {
+    prefix: "host",
+    httpOnly: true,
+    sameSite: "Lax",
+    path: "/",
+    maxAge: GOOGLE_FLOW_TTL_MS / 1000,
+  });
+  const url = new URL(GOOGLE_AUTH);
+  const params: Record<string, string> = {
+    client_id: google.clientId,
+    redirect_uri: `${publicOrigin}/admin/login/google/callback`,
+    response_type: "code",
+    // A user's name labels their account; the admin needs only the email.
+    scope: kind === "user" ? "openid email profile" : "openid email",
+    state: flow.state,
+    nonce: flow.nonce,
+    code_challenge: s256(flow.verifier),
+    code_challenge_method: "S256",
+    prompt: "select_account",
+  };
+  if (kind === "admin") params.login_hint = admin.email;
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  return c.redirect(url.toString(), 302);
+}
+
 // The id_token comes straight from Google's token endpoint over TLS, so its claims are checked
 // and its signature is not (OpenID Connect Core 3.1.3.7, step 6).
 function idTokenClaims(idToken: unknown): Record<string, unknown> | null {
@@ -120,37 +156,14 @@ export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
       const ip = c.env?.ip;
       if (ip && !limitLogin(rateLimitKey(ip)).ok) return c.html(loginPage("Too many attempts. Try again later."), 429);
       const pending = isUuid(c.req.query("pending") ?? "") ? c.req.query("pending")! : null;
-      const flow = { state: random(), verifier: random(), nonce: random(), pending, exp: now().getTime() + GOOGLE_FLOW_TTL_MS };
-      await setSignedCookie(c, GOOGLE_COOKIE, Buffer.from(JSON.stringify(flow)).toString("base64url"), admin.sessionSecret, {
-        prefix: "host",
-        httpOnly: true,
-        sameSite: "Lax",
-        path: "/",
-        maxAge: GOOGLE_FLOW_TTL_MS / 1000,
-      });
-      const url = new URL(GOOGLE_AUTH);
-      for (const [k, v] of Object.entries({
-        client_id: google.clientId,
-        redirect_uri: redirectUri,
-        response_type: "code",
-        scope: "openid email",
-        state: flow.state,
-        nonce: flow.nonce,
-        code_challenge: s256(flow.verifier),
-        code_challenge_method: "S256",
-        login_hint: admin.email,
-        prompt: "select_account",
-      })) {
-        url.searchParams.set(k, v);
-      }
-      return c.redirect(url.toString(), 302);
+      return startGoogle(c, { publicOrigin, admin, now }, "admin", pending);
     });
 
     app.get("/login/google/callback", async (c) => {
       const refuse = (message: string) => c.html(loginPage(message), 400);
       const raw = await getSignedCookie(c, admin.sessionSecret, GOOGLE_COOKIE, "host");
       deleteCookie(c, GOOGLE_COOKIE, { prefix: "host", path: "/", secure: true });
-      let flow: { state?: string; verifier?: string; nonce?: string; pending?: string | null; exp?: number } = {};
+      let flow: { kind?: string; state?: string; verifier?: string; nonce?: string; pending?: string | null; exp?: number } = {};
       try {
         flow = typeof raw === "string" ? JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) : {};
       } catch {}
@@ -173,16 +186,28 @@ export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
       ).catch(() => null);
       const body = res?.ok ? await res.json().catch(() => null) : null;
       const claims = idTokenClaims(body?.id_token);
-      const valid =
+      const verified =
         claims &&
         GOOGLE_ISSUERS.includes(String(claims.iss)) &&
         claims.aud === google.clientId &&
         Number(claims.exp) * 1000 > now().getTime() &&
         claims.nonce === flow.nonce &&
         claims.email_verified === true &&
-        String(claims.email).toLowerCase() === admin.email.toLowerCase();
-      if (!valid) return refuse("That Google account cannot sign in here.");
+        typeof claims.sub === "string" &&
+        typeof claims.email === "string";
+      if (!verified) return refuse("That Google account cannot sign in here.");
 
+      if (flow.kind === "user") {
+        const user = await upsertGoogleUser(
+          sql,
+          { sub: claims.sub as string, email: claims.email as string, name: typeof claims.name === "string" ? claims.name : null },
+          now(),
+        );
+        if (!user) return refuse("This account is blocked.");
+        await setUserSession(c, admin.sessionSecret, user.id, now());
+        return c.redirect("/", 303);
+      }
+      if (String(claims.email).toLowerCase() !== admin.email.toLowerCase()) return refuse("That Google account cannot sign in here.");
       await setSession(c, admin, now());
       return c.redirect(afterSignIn(flow.pending), 303);
     });

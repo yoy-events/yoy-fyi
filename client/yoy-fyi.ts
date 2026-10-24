@@ -43,7 +43,7 @@ export type Link = {
   created_at: string;
   updated_at: string;
   disabled_at: string | null;
-  created_via: "api" | "admin" | "mcp";
+  created_via: "api" | "admin" | "mcp" | "web";
 };
 
 export type LinkListQuery = {

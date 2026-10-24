@@ -27,7 +27,7 @@ type FormValues = Record<string, string>;
 const UTM = ["utm_source", "utm_medium", "utm_campaign"] as const;
 
 // Turns the admin form into the same JSON body POST /v1/links accepts; blank fields are omitted.
-function linkBody(f: FormValues): Record<string, unknown> {
+export function linkBody(f: FormValues): Record<string, unknown> {
   const body: Record<string, unknown> = { target_url: f.target_url ?? "" };
   if (f.code) body.code = f.code;
   if (f.title) body.title = f.title;
