@@ -8,9 +8,14 @@ export type TargetRejection =
   | "own_host"
   | "private_address"
   | "unresolvable"
-  | "port"; // webhooks only, see webhookUrlRejection
+  | "port" // webhooks only, see webhookUrlRejection
+  | "unsafe"; // listed by Google Safe Browsing, links only
 
-type Options = { ownHost: string; resolve?: (host: string) => Promise<string[]> };
+type Options = {
+  ownHost: string;
+  resolve?: (host: string) => Promise<string[]>;
+  unsafeUrls?: (urls: string[]) => Promise<Set<string>>;
+};
 
 // Separate lists: a BlockList may match IPv4 addresses against IPv4-mapped IPv6 rules.
 const blockedV4 = new BlockList();
@@ -53,7 +58,7 @@ const resolveAll = async (host: string) => (await lookup(host, { all: true })).m
 // Returns why a target is unacceptable, or null when it is fine. DNS can change after this
 // check: for links that is fine because the browser follows the redirect; for webhooks see
 // postWebhook in src/outbox.ts.
-export async function checkTarget(raw: string, { ownHost, resolve = resolveAll }: Options): Promise<TargetRejection | null> {
+export async function checkTarget(raw: string, { ownHost, resolve = resolveAll, unsafeUrls }: Options): Promise<TargetRejection | null> {
   let url: URL;
   try {
     url = new URL(raw);
@@ -76,5 +81,6 @@ export async function checkTarget(raw: string, { ownHost, resolve = resolveAll }
     return "unresolvable";
   }
   if (addresses.length === 0) return "unresolvable";
-  return addresses.some(isBlocked) ? "private_address" : null;
+  if (addresses.some(isBlocked)) return "private_address";
+  return unsafeUrls && (await unsafeUrls([raw])).has(raw) ? "unsafe" : null;
 }

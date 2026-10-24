@@ -4,6 +4,7 @@ import { csrf } from "hono/csrf";
 import { appsRoutes } from "./apps";
 import { userRoutes } from "./users";
 import { type AdminConfig, authRoutes, requireAdmin } from "./auth";
+import type { UnsafeUrls } from "../safe-browsing";
 import { linkRoutes } from "./links";
 import { serviceRoutes } from "./services";
 
@@ -15,6 +16,7 @@ type Deps = {
   admin: AdminConfig;
   now: () => Date;
   resolveHost?: (host: string) => Promise<string[]>;
+  unsafeUrls?: UnsafeUrls;
 };
 
 export function adminRoutes(deps: Deps) {

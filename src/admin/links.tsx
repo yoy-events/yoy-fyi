@@ -4,6 +4,7 @@ import QRCode from "qrcode";
 import { type Bots, type Scope, breakdown, timeseries } from "../analytics";
 import { type LinkRow, createLink, toLink } from "../links";
 import { DIMENSIONS, type Dimension } from "../rollup";
+import type { UnsafeUrls } from "../safe-browsing";
 import { BarChart, Ranking } from "./charts";
 import { Layout } from "./layout";
 
@@ -21,7 +22,7 @@ const DIMENSION_TITLES: Record<Dimension, string> = {
   os: "Operating systems",
 };
 
-type Deps = { sql: SQL; publicOrigin: string; resolveHost?: (host: string) => Promise<string[]> };
+type Deps = { sql: SQL; publicOrigin: string; resolveHost?: (host: string) => Promise<string[]>; unsafeUrls?: UnsafeUrls };
 type FormValues = Record<string, string>;
 
 const UTM = ["utm_source", "utm_medium", "utm_campaign"] as const;
@@ -125,7 +126,7 @@ export async function LinkList({ sql, serviceId, status }: { sql: SQL; serviceId
   );
 }
 
-export function linkRoutes({ sql, publicOrigin, resolveHost }: Deps) {
+export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls }: Deps) {
   const app = new Hono();
   const ownHost = new URL(publicOrigin).hostname;
 
@@ -135,7 +136,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost }: Deps) {
     if (!service) return c.notFound();
     const values = Object.fromEntries(Object.entries(await c.req.parseBody()).map(([k, v]) => [k, String(v).trim()]));
 
-    const result = await createLink(sql, { ownHost, resolveHost }, service.id, linkBody(values), null, "admin");
+    const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, service.id, linkBody(values), null, "admin");
     if (result.kind !== "error") return c.redirect(`/admin/links/${result.row.id}`, 303);
 
     const fields = (result.details?.fields ?? {}) as Record<string, string>;

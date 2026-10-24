@@ -713,7 +713,8 @@ components:
               description: |
                 Machine-readable context. For `validation_failed`: `{ fields: { <path>: <reason> } }`.
                 For `target_rejected`: `{ reason: scheme | credentials | private_address |
-                own_host | unresolvable | too_long | port }` (`port` applies to webhooks only).
+                own_host | unresolvable | too_long | port | unsafe }` (`port` applies to webhooks only;
+                `unsafe` means Google Safe Browsing lists the link target).
               additionalProperties: true
 
     Code:

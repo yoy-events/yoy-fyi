@@ -24,6 +24,9 @@ export function loadConfig(env = process.env) {
     // Optional Sign in with Google for /admin: the client ID lives in deploy/<stage>.env, the secret
     // only on the server. Both or neither.
     google: googleSignIn(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
+    // Optional secret: a Google API key with the Safe Browsing API enabled. Without it link
+    // targets are not checked against Safe Browsing.
+    safeBrowsingApiKey: env.SAFE_BROWSING_API_KEY || undefined,
   };
 }
 

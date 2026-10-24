@@ -13,6 +13,7 @@ import { isUuid } from "./http";
 import { type Scope, issueKey } from "./keys";
 import { type LinkRow, createLink, toLink } from "./links";
 import { createRateLimiter } from "./ratelimit";
+import type { UnsafeUrls } from "./safe-browsing";
 import { type User, clearUserSession, currentUser } from "./users";
 
 const DAY = 86_400_000;
@@ -32,6 +33,7 @@ type Deps = {
   admin: AdminConfig;
   now: () => Date;
   resolveHost?: (host: string) => Promise<string[]>;
+  unsafeUrls?: UnsafeUrls;
 };
 type Env = { Variables: { user: User } };
 
@@ -115,7 +117,7 @@ function CreateForm({ values = {}, errors = [] }: { values?: Record<string, stri
   );
 }
 
-export function webRoutes({ sql, publicOrigin, admin, now, resolveHost }: Deps) {
+export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUrls }: Deps) {
   const app = new Hono<Env>();
   const ownHost = new URL(publicOrigin).hostname;
   const limitCreate = createRateLimiter({ perMinute: 20 / 60, burst: 20 });
@@ -232,7 +234,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost }: Deps) 
     const u = c.get("user");
     const values = Object.fromEntries(Object.entries(await c.req.parseBody()).map(([k, v]) => [k, String(v).trim()]));
     if (!limitCreate(u.id).ok) return c.text("Too many new links. Try again in an hour.", 429);
-    const result = await createLink(sql, { ownHost, resolveHost }, u.serviceId, linkBody(values), null, "web");
+    const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, u.serviceId, linkBody(values), null, "web");
     if (result.kind !== "error") return c.redirect(`/?created=${result.row.id}`, 303);
     const fields = (result.details?.fields ?? {}) as Record<string, string>;
     const errors = Object.keys(fields).length
