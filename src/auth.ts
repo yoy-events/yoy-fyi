@@ -3,13 +3,14 @@ import { createMiddleware } from "hono/factory";
 import { apiError } from "./http";
 import { type Caller, type Scope, authenticate } from "./keys";
 
-export type AuthEnv = { Variables: { caller: Caller } };
+// `caller` as a binding comes only from in-process dispatch by /mcp, never from a request.
+export type AuthEnv = { Variables: { caller: Caller }; Bindings: { caller?: Caller } };
 
 // last_used_at is written at most once a minute per key, from this process.
 export function requireKey(sql: SQL) {
   const touchedAt = new Map<string, number>();
   return createMiddleware<AuthEnv>(async (c, next) => {
-    const caller = await authenticate(sql, c.req.header("authorization"));
+    const caller = c.env?.caller ?? (await authenticate(sql, c.req.header("authorization")));
     if (!caller) return apiError(c, 401, "unauthorized", "Missing, unknown or revoked API key.");
     const now = Date.now();
     if (now - (touchedAt.get(caller.keyId) ?? 0) >= 60_000) {

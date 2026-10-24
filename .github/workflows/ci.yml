@@ -70,6 +70,7 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' "$ORIGIN/no-such-code-$GITHUB_RUN_ID")" = 404
           # /mcp is up and points unauthenticated clients at its protected-resource metadata.
           curl -s -o /dev/null -D - -X POST "$ORIGIN/mcp" | grep -qi "^www-authenticate: Bearer resource_metadata="
+          curl -fsS "$ORIGIN/.well-known/oauth-protected-resource/mcp" | grep -q "\"resource\":\"$ORIGIN/mcp\""
       - name: Remove dangling images
         if: always()
         run: docker image prune -f

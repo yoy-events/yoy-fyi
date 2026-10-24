@@ -1,6 +1,7 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { csrf } from "hono/csrf";
+import { appsRoutes } from "./apps";
 import { type AdminConfig, authRoutes, requireAdmin } from "./auth";
 import { linkRoutes } from "./links";
 import { serviceRoutes } from "./services";
@@ -25,6 +26,7 @@ export function adminRoutes(deps: Deps) {
   pages.use(requireAdmin(deps));
   pages.route("/", serviceRoutes(deps.sql));
   pages.route("/", linkRoutes(deps));
+  pages.route("/", appsRoutes(deps.sql, deps.now));
   app.route("/", pages);
   return app;
 }
