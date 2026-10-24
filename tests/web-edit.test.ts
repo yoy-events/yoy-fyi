@@ -184,3 +184,24 @@ describe("enabling a disabled link", () => {
     expect((await post(`/links/${id}/enable`, {}, "")).status).toBe(401);
   });
 });
+
+describe("links for channels", () => {
+  test("the link page offers a copyable short link per channel with utm_source and utm_medium", async () => {
+    const html = await (await get(`/links/${id}`)).text();
+    for (const [source, medium] of [
+      ["telegram", "social"],
+      ["instagram", "social"],
+      ["facebook", "social"],
+      ["email", "email"],
+    ]) {
+      const url = `${ORIGIN}/annlink?utm_source=${source}&amp;utm_medium=${medium}`;
+      expect(html).toContain(`data-copy="${url}"`);
+    }
+  });
+
+  test("a channel link records its source on the click and reaches the target", async () => {
+    const res = await get("/annlink?utm_source=telegram&utm_medium=social", "");
+    expect(res.headers.get("location")).toBe("https://example.com/old?utm_source=telegram&utm_medium=social");
+    expect((await sql`select utm_source, utm_medium from clicks`)[0]).toEqual({ utm_source: "telegram", utm_medium: "social" });
+  });
+});

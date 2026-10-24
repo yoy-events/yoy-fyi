@@ -72,6 +72,15 @@ function Page({ title, user, children }: { title: string; user?: User | null; ch
   );
 }
 
+// Channel variants of a short link: the redirect passes these query parameters on to the target
+// and records them on the click (see buildTarget), so no extra link is needed.
+const CHANNELS = [
+  ["Telegram", "telegram", "social"],
+  ["Instagram", "instagram", "social"],
+  ["Facebook", "facebook", "social"],
+  ["email", "email", "email"],
+] as const;
+
 const OPTIONAL = ["title", "code", "tags", "utm_source", "utm_medium", "utm_campaign"] as const;
 
 // One field to start with, like Bitly and Dub; the rest waits under More options (no JavaScript).
@@ -316,6 +325,23 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           </button>
         </div>
         <p class="meta truncate">→ {link.target_url}</p>
+        <details>
+          <summary>Links for channels</summary>
+          <p class="meta">The same short link with UTM tags, so clicks show where they came from.</p>
+          <div class="stack">
+            {CHANNELS.map(([name, source, medium]) => {
+              const url = `${link.short_url}?utm_source=${source}&utm_medium=${medium}`;
+              return (
+                <div class="row">
+                  <input value={url} readonly aria-label={`Short link for ${name}`} />
+                  <button type="button" data-copy={url}>
+                    Copy for {name}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </details>
         <p>
           <span class={`badge ${link.status}`}>{link.status}</span>
           {link.tags.length > 0 && <span class="meta"> · {link.tags.join(", ")}</span>}
