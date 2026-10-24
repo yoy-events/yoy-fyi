@@ -43,6 +43,7 @@ function Page({ title, user, children }: { title: string; user?: User | null; ch
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <title>{title === "yoy.fyi" ? title : `${title} · yoy.fyi`}</title>
         <link rel="stylesheet" href="/static/admin.css" />
+        <script src="/static/copy.js" defer></script>
       </head>
       <body>
         <header>
@@ -140,6 +141,9 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost }: Deps) 
     isUuid(id) ? ((await sql`select * from links where id = ${id} and service_id = ${u.serviceId}`)[0] as LinkRow | undefined) : undefined;
 
   async function home(c: Context, u: User, form?: { values: Record<string, string>; errors: string[] }, status: 200 | 422 = 200) {
+    // The link just created, shown on top with its QR, like Dub and Bitly.
+    const createdRow = await ownLink(u, c.req.query("created") ?? "");
+    const created = createdRow ? toLink(createdRow, publicOrigin, now()) : null;
     const links: (LinkRow & { clicks_7d: number })[] = await sql`
       select l.*, coalesce((select sum(d.clicks) from link_stats_daily d
                             where d.link_id = l.id and not d.is_bot and d.bucket >= ${new Date(now().getTime() - 7 * DAY)}), 0)::int as clicks_7d
@@ -147,7 +151,24 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost }: Deps) 
     return c.html(
       <Page title="My links" user={u}>
         <h1>My links</h1>
-        {links.length === 0 && (
+        {created && (
+          <section class="card stack created">
+            <h2>Your short link is ready</h2>
+            <div class="row">
+              <input value={created.short_url} readonly aria-label="Short link" />
+              <button type="button" data-copy={created.short_url}>
+                Copy
+              </button>
+            </div>
+            <img src={`/links/${created.id}/qr.svg`} alt={`QR code for ${created.short_url}`} class="qr" width="160" height="160" />
+            <p>
+              Download QR: <a href={`/links/${created.id}/qr.png`} download={`${created.code}.png`}>PNG</a> ·{" "}
+              <a href={`/links/${created.id}/qr.svg`} download={`${created.code}.svg`}>SVG</a> ·{" "}
+              <a href={`/links/${created.id}`}>Stats</a>
+            </p>
+          </section>
+        )}
+        {links.length === 0 && !created && (
           <p class="notice">
             Create your first short link: paste a long URL below and get a short yoy.fyi link with a QR code and click
             stats.
@@ -206,7 +227,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost }: Deps) 
     const values = Object.fromEntries(Object.entries(await c.req.parseBody()).map(([k, v]) => [k, String(v).trim()]));
     if (!limitCreate(u.id).ok) return c.text("Too many new links. Try again in an hour.", 429);
     const result = await createLink(sql, { ownHost, resolveHost }, u.serviceId, linkBody(values), null, "web");
-    if (result.kind !== "error") return c.redirect(`/links/${result.row.id}`, 303);
+    if (result.kind !== "error") return c.redirect(`/?created=${result.row.id}`, 303);
     const fields = (result.details?.fields ?? {}) as Record<string, string>;
     const errors = Object.keys(fields).length
       ? Object.entries(fields).map(([k, v]) => `${k}: ${v}`)
@@ -228,9 +249,13 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost }: Deps) 
     return c.html(
       <Page title={link.title ?? link.code} user={u}>
         <h1>{link.title ?? link.code}</h1>
-        <p>
-          <code>{link.short_url}</code> → <span class="truncate">{link.target_url}</span>
-        </p>
+        <div class="row">
+          <input value={link.short_url} readonly aria-label="Short link" />
+          <button type="button" data-copy={link.short_url}>
+            Copy
+          </button>
+        </div>
+        <p class="meta truncate">→ {link.target_url}</p>
         <p>
           <span class={`badge ${link.status}`}>{link.status}</span>
           {link.tags.length > 0 && <span class="meta"> · {link.tags.join(", ")}</span>}

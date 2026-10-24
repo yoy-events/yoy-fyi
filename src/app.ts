@@ -83,7 +83,8 @@ export function createApp({
     });
   const publicHeaders = headers({});
   // Admin pages load their stylesheet and QR images from this origin and post forms to it.
-  const adminHeaders = headers({ styleSrc: ["'self'"], imgSrc: ["'self'"], formAction: ["'self'"] });
+  // The pages' only script is /static/copy.js (the Copy button); no inline script is allowed.
+  const adminHeaders = headers({ styleSrc: ["'self'"], imgSrc: ["'self'"], formAction: ["'self'"], scriptSrc: ["'self'"] });
   // The OAuth consent form redirects to claude.ai or chatgpt.com after its POST, and Chrome
   // applies form-action to that redirect, so this page sets no form-action at all.
   const oauthHeaders = headers({ styleSrc: ["'self'"] });
@@ -97,6 +98,10 @@ export function createApp({
   });
 
   const adminCss = Bun.file(new URL("./admin/admin.css", import.meta.url).pathname);
+  const copyJs = Bun.file(new URL("./admin/copy.js", import.meta.url).pathname);
+  app.get("/static/copy.js", (c) =>
+    c.body(copyJs.stream(), 200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600" }),
+  );
   app.get("/static/admin.css", (c) =>
     c.body(adminCss.stream(), 200, { "Content-Type": "text/css; charset=utf-8", "Cache-Control": "public, max-age=3600" }),
   );

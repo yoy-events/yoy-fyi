@@ -82,7 +82,8 @@ async function signIn(sub = "google-1", email = "ann@example.com", extra: Record
 
 async function createVia(cookie: string, fields: Record<string, string>) {
   const res = await post("/links", fields, cookie);
-  return { res, id: res.headers.get("location")?.split("/").pop() };
+  const location = res.headers.get("location");
+  return { res, id: location ? new URL(location, ORIGIN).searchParams.get("created") : null };
 }
 
 describe("signing in", () => {
@@ -155,6 +156,53 @@ describe("home page", () => {
     const html = await (await get("/", ann)).text();
     expect(html).toContain("https://example.com/ann");
     expect(html).not.toContain("https://example.com/bob");
+  });
+});
+
+describe("after creating", () => {
+  test("returns to / with a card: short link, copy button, QR and downloads", async () => {
+    const { cookie } = await signIn();
+    const { res, id } = await createVia(cookie, { target_url: "https://example.com/a" });
+    expect(res.headers.get("location")).toBe(`/?created=${id}`);
+
+    const html = await (await get(`/?created=${id}`, cookie)).text();
+    const [{ code }] = await sql`select code from links where id = ${id}`;
+    const short = `${ORIGIN}/${code}`;
+    expect(html).toContain(`value="${short}" readonly`);
+    expect(html).toContain(`data-copy="${short}"`);
+    expect(html).toContain(`src="/links/${id}/qr.svg"`);
+    expect(html).toContain(`href="/links/${id}/qr.png"`);
+    expect(html).toContain(`href="/links/${id}"`);
+    expect(html).toContain('src="/static/copy.js"');
+  });
+
+  test.each([
+    ["another user's link", "other"],
+    ["a malformed id", "not-a-uuid"],
+    ["an empty id", ""],
+  ])("with %s there is no card", async (_, which) => {
+    const ann = (await signIn("ga", "ann@example.com")).cookie;
+    const bob = (await signIn("gb", "bob@example.com")).cookie;
+    const { id } = await createVia(bob, { target_url: "https://example.com/b" });
+    const created = which === "other" ? id : which;
+    const res = await get(`/?created=${created}`, ann);
+    expect(res.status).toBe(200);
+    expect(await res.text()).not.toContain("data-copy=");
+  });
+
+  test("the link page has a copy button too", async () => {
+    const { cookie } = await signIn();
+    const { id } = await createVia(cookie, { target_url: "https://example.com/a" });
+    expect(await (await get(`/links/${id}`, cookie)).text()).toContain("data-copy=");
+  });
+
+  test("copy.js is served from our origin and allowed by the CSP, with no inline script", async () => {
+    const js = await get("/static/copy.js");
+    expect(js.status).toBe(200);
+    expect(js.headers.get("content-type")).toStartWith("text/javascript");
+    const page = await get("/");
+    expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
+    expect(await page.text()).not.toMatch(/<script>(?!<\/script>)/);
   });
 });
 
