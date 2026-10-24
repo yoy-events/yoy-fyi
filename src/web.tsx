@@ -11,9 +11,10 @@ import { linkBody } from "./admin/links";
 import { timeseries, breakdown } from "./analytics";
 import { isUuid } from "./http";
 import { type Scope, issueKey } from "./keys";
-import { type LinkRow, createLink, toLink } from "./links";
+import { type LinkRow, createLink, toLink, updateLink } from "./links";
 import { createRateLimiter } from "./ratelimit";
 import type { UnsafeUrls } from "./safe-browsing";
+import { checkTarget } from "./target-policy";
 import { type User, clearUserSession, currentUser } from "./users";
 
 const DAY = 86_400_000;
@@ -243,11 +244,28 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     return home(c, u, { values, errors }, 422);
   });
 
-  app.get("/links/:id", async (c) => {
-    const u = c.get("user");
-    const row = await ownLink(u, c.req.param("id"));
-    if (!row) return c.notFound();
+  // Form fields of the edit form; empty title, tags and expiry clear them.
+  const editBody = (f: Record<string, string>) => ({
+    target_url: f.target_url ?? "",
+    title: f.title || null,
+    tags: (f.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean),
+    expires_at: f.expires_at ? `${f.expires_at}:00Z` : null,
+  });
+  const errorList = (r: { message: string; details?: Record<string, unknown> }) => {
+    const fields = (r.details?.fields ?? {}) as Record<string, string>;
+    return Object.keys(fields).length
+      ? Object.entries(fields).map(([k, v]) => `${k}: ${v}`)
+      : [r.details?.reason ? `${r.message} (${r.details.reason})` : r.message];
+  };
+
+  async function linkPage(c: Context, u: User, row: LinkRow, form?: { values: Record<string, string>; errors: string[] }, status: 200 | 409 | 422 = 200) {
     const link = toLink(row, publicOrigin, now());
+    const values = form?.values ?? {
+      target_url: row.target_url,
+      title: row.title ?? "",
+      tags: row.tags.join(", "),
+      expires_at: row.expires_at ? row.expires_at.toISOString().slice(0, 16) : "",
+    };
     const dayEnd = Math.floor(now().getTime() / DAY) * DAY + DAY;
     const scope = { serviceId: u.serviceId, linkId: link.id, tag: null, from: new Date(dayEnd - 30 * DAY), to: new Date(dayEnd), bots: "exclude" as const };
     const daily = await timeseries(sql, scope, "day");
@@ -283,14 +301,89 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           <Ranking title="Devices" items={devices!.items} total={devices!.total_clicks} />
         </div>
         {link.status !== "disabled" && (
+          <details open={!!form}>
+            <summary>Edit link</summary>
+            <form method="post" action={`/links/${link.id}`} class="stack card">
+              {form && form.errors.length > 0 && (
+                <ul class="errors">
+                  {form.errors.map((e) => (
+                    <li>{e}</li>
+                  ))}
+                </ul>
+              )}
+              <label>
+                Where it goes
+                <input type="url" name="target_url" required value={values.target_url} />
+              </label>
+              <label>
+                Title
+                <input name="title" maxlength={200} value={values.title} />
+              </label>
+              <label>
+                Tags <span class="meta">comma-separated</span>
+                <input name="tags" value={values.tags} />
+              </label>
+              <label>
+                Expires <span class="meta">UTC, empty for never</span>
+                <input type="datetime-local" name="expires_at" value={values.expires_at} />
+              </label>
+              <button type="submit">Save</button>
+            </form>
+          </details>
+        )}
+        {form && link.status === "disabled" && <p class="notice">{form.errors.join(" ")}</p>}
+        {link.status !== "disabled" ? (
           <form method="post" action={`/links/${link.id}/disable`}>
             <button type="submit" class="danger">
               Disable link
             </button>
           </form>
+        ) : row.disabled_by === "owner" ? (
+          <form method="post" action={`/links/${link.id}/enable`}>
+            <button type="submit">Enable link</button>
+          </form>
+        ) : (
+          <p class="meta">yoy.fyi disabled this link. Contact {admin.email} if you think that is a mistake.</p>
         )}
       </Page>,
+      status,
     );
+  }
+
+  app.get("/links/:id", async (c) => {
+    const u = c.get("user");
+    const row = await ownLink(u, c.req.param("id"));
+    if (!row) return c.notFound();
+    return linkPage(c, u, row);
+  });
+
+  app.post("/links/:id", async (c) => {
+    const u = c.get("user");
+    const row = await ownLink(u, c.req.param("id"));
+    if (!row) return c.notFound();
+    const values = Object.fromEntries(Object.entries(await c.req.parseBody()).map(([k, v]) => [k, String(v).trim()]));
+    const result = await updateLink(sql, { ownHost, resolveHost, unsafeUrls }, u.serviceId, row.id, editBody(values));
+    if (result.kind === "updated") return c.redirect(`/links/${row.id}`, 303);
+    if (result.status === 404) return c.notFound();
+    return linkPage(c, u, row, { values, errors: errorList(result) }, result.status);
+  });
+
+  // Only what the owner disabled can be re-enabled here; admin and Safe Browsing takedowns
+  // stay down. The target is checked again in case it changed since.
+  app.post("/links/:id/enable", async (c) => {
+    const u = c.get("user");
+    const row = await ownLink(u, c.req.param("id"));
+    if (!row) return c.notFound();
+    if (row.disabled_at) {
+      const refuse = (why: string) => linkPage(c, u, row, { values: {}, errors: [`This link cannot be enabled: ${why}.`] }, 422);
+      if (row.disabled_by !== "owner") return refuse("it was disabled by yoy.fyi");
+      const rejection = await checkTarget(row.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
+      if (rejection) return refuse(`its target is not allowed (${rejection})`);
+      await sql`
+        update links set disabled_at = null, disabled_by = null, updated_at = ${now()}
+        where id = ${row.id} and service_id = ${u.serviceId} and disabled_by = 'owner'`;
+    }
+    return c.redirect(`/links/${row.id}`, 303);
   });
 
   app.get("/links/:id/qr.svg", async (c) => {
@@ -310,7 +403,9 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     const u = c.get("user");
     const id = c.req.param("id");
     if (!(await ownLink(u, id))) return c.notFound();
-    await sql`update links set disabled_at = coalesce(disabled_at, ${now()}), updated_at = ${now()} where id = ${id} and service_id = ${u.serviceId}`;
+    await sql`
+      update links set disabled_at = ${now()}, disabled_by = 'owner', updated_at = ${now()}
+      where id = ${id} and service_id = ${u.serviceId} and disabled_at is null`;
     return c.redirect(`/links/${id}`, 303);
   });
 

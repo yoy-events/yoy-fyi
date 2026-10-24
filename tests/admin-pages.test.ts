@@ -171,6 +171,16 @@ describe("links", () => {
     expect(res.headers.get("location")).toBe(`/admin/links/${id}`);
     expect(await html(`/admin/links/${id}`)).toContain("disabled");
     expect((await app.request("https://yoy.fyi/bye")).status).toBe(410);
+    expect((await sql`select disabled_by from links where id = ${id}`)[0].disabled_by).toBe("admin");
+  });
+
+  test("a link its owner disabled can still be taken down by the admin", async () => {
+    const id = await createLink(sql, serviceId, { code: "own", target_url: "https://example.com/", disabled_at: new Date() });
+    await sql`update links set disabled_by = 'owner' where id = ${id}`;
+    expect(await html(`/admin/links/${id}`)).toContain(`action="/admin/links/${id}/disable"`);
+
+    expect((await adminPost(app, `/admin/links/${id}/disable`, {}, cookie)).status).toBe(303);
+    expect((await sql`select disabled_by from links where id = ${id}`)[0].disabled_by).toBe("admin");
   });
 
   test("an unknown link is 404", async () => {

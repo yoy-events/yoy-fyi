@@ -185,8 +185,9 @@ paths:
       summary: Disable a link (soft delete)
       description: |
         Requires `links:write`. The short URL starts answering 410. Idempotent: disabling a
-        disabled link returns 200 with `disabled_at` unchanged. There is no re-enable and the
-        code is never reused.
+        disabled link returns 200 with `disabled_at` unchanged. The API has no re-enable; the
+        owner of a personal account can re-enable a link on its yoy.fyi page, which checks the
+        target again. The code is never given to another link.
       responses:
         '200':
           description: Disabled link

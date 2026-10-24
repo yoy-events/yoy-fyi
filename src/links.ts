@@ -38,6 +38,7 @@ export type LinkRow = {
   created_at: Date;
   updated_at: Date;
   disabled_at: Date | null;
+  disabled_by: "owner" | "admin" | "safe_browsing" | null;
   created_via: CreatedVia;
 };
 
@@ -271,6 +272,48 @@ type Deps = {
 
 // The MCP endpoint dispatches into these routes in-process and sets `createdVia` as a binding,
 // which a client request cannot set.
+type UpdateResult =
+  | { kind: "updated"; row: LinkRow }
+  | {
+      kind: "error";
+      status: 404 | 409 | 422;
+      code: "not_found" | "link_disabled" | "validation_failed" | "target_rejected";
+      message: string;
+      details?: Record<string, unknown>;
+    };
+
+// Changes an active link of a service with the same rules everywhere: /v1 PATCH and the web page.
+export async function updateLink(
+  sql: SQL,
+  { ownHost, resolveHost, unsafeUrls }: { ownHost: string; resolveHost?: (host: string) => Promise<string[]>; unsafeUrls?: UnsafeUrls },
+  serviceId: string,
+  id: string,
+  body: Record<string, unknown>,
+): Promise<UpdateResult> {
+  const fields = validateLinkUpdate(body, new Date());
+  if (Object.keys(fields).length) {
+    return { kind: "error", status: 422, code: "validation_failed", message: "Request body failed validation.", details: { fields } };
+  }
+  const [link] = await sql`select disabled_at from links where id = ${id} and service_id = ${serviceId}`;
+  if (!link) return { kind: "error", status: 404, code: "not_found", message: "Link not found." };
+  const disabled = { kind: "error", status: 409, code: "link_disabled", message: "A disabled link cannot be changed." } as const;
+  if (link.disabled_at) return disabled;
+  if (typeof body.target_url === "string") {
+    const rejection = await checkTarget(body.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
+    if (rejection) {
+      return { kind: "error", status: 422, code: "target_rejected", message: "The target URL is not allowed.", details: { reason: rejection } };
+    }
+  }
+
+  const changes = { ...body, updated_at: new Date() } as Record<string, unknown>;
+  if (Array.isArray(body.tags)) changes.tags = sql.array(body.tags, "text");
+  const [row] = await sql`
+    update links set ${sql(changes)}
+    where id = ${id} and service_id = ${serviceId} and disabled_at is null
+    returning *`;
+  return row ? { kind: "updated", row: row as LinkRow } : disabled;
+}
+
 type LinkEnv = AuthEnv & { Bindings: { createdVia?: CreatedVia } };
 
 export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createLimit = { perMinute: 60, burst: 20 } }: Deps) {
@@ -346,26 +389,9 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createL
     if (!isUuid(id)) return apiError(c, 404, "not_found", "Link not found.");
     const body = await readJsonObject(c);
     if (!body) return apiError(c, 400, "invalid_request", "Body must be a JSON object.");
-    const fields = validateLinkUpdate(body, new Date());
-    if (Object.keys(fields).length) return validationFailed(c, fields);
-
-    const serviceId = c.get("caller").serviceId;
-    const [link] = await sql`select disabled_at from links where id = ${id} and service_id = ${serviceId}`;
-    if (!link) return apiError(c, 404, "not_found", "Link not found.");
-    if (link.disabled_at) return apiError(c, 409, "link_disabled", "A disabled link cannot be changed.");
-    if (typeof body.target_url === "string") {
-      const rejection = await checkTarget(body.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
-      if (rejection) return apiError(c, 422, "target_rejected", "The target URL is not allowed.", { reason: rejection });
-    }
-
-    const changes = { ...body, updated_at: new Date() } as Record<string, unknown>;
-    if (Array.isArray(body.tags)) changes.tags = sql.array(body.tags, "text");
-    const [row] = await sql`
-      update links set ${sql(changes)}
-      where id = ${id} and service_id = ${serviceId} and disabled_at is null
-      returning *`;
-    if (!row) return apiError(c, 409, "link_disabled", "A disabled link cannot be changed.");
-    return c.json(toLink(row as LinkRow, publicOrigin));
+    const result = await updateLink(sql, { ownHost, resolveHost, unsafeUrls }, c.get("caller").serviceId, id, body);
+    if (result.kind === "error") return apiError(c, result.status, result.code, result.message, result.details);
+    return c.json(toLink(result.row, publicOrigin));
   });
 
   app.post("/links/:id/disable", requireScope("links:write"), async (c) => {
@@ -373,6 +399,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createL
     const [row] = isUuid(id)
       ? await sql`
           update links set disabled_at = coalesce(disabled_at, now()),
+                           disabled_by = case when disabled_at is null then 'owner' else disabled_by end,
                            updated_at = case when disabled_at is null then now() else updated_at end
           where id = ${id} and service_id = ${c.get("caller").serviceId}
           returning *`
