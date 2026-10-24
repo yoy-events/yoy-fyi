@@ -45,7 +45,7 @@ To change a secret without it appearing in the terminal or shell history:
 ssh -t yoy-fyi-vm 'read -rsp "value: " V; echo; sudo sed -i "s|^RESEND_API_KEY=.*|RESEND_API_KEY=$V|" /etc/yoy-fyi/prod/app.env'
 ```
 
-Then redeploy by merging any PR, or restart the stack once over SSH. Do not rotate `WEBHOOK_ENC_KEY` in place: it decrypts the stored webhook secrets.
+Containers read these files only when they are created, so the change takes effect on the next deploy. A plain `docker restart` keeps the old values. Do not rotate `WEBHOOK_ENC_KEY` in place: it decrypts the stored webhook secrets.
 
 ## DNS
 
