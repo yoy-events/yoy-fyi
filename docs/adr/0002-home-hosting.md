@@ -49,10 +49,10 @@ A deploy recreates only the `app` container. Postgres keeps running, so the redi
 
 ### Delivery
 
-- Private GitHub repo `yoy-events/yoy-fyi`. Creating it needs Roman's go-ahead.
+- Public GitHub repo `yoy-events/yoy-fyi` (made public on 2026-10-23; public repos get unlimited Actions minutes). Workflow runs from fork PRs need Roman's approval for every outside contributor (`fork-pr-contributor-approval: all_external_contributors`).
 - Every PR runs Biome, `tsc --noEmit`, `bun test` and Playwright on GitHub-hosted runners.
 - Deploys run on a GitHub Actions self-hosted runner inside the VM, as a dedicated user in the `docker` group. The runner polls GitHub, so nothing inbound is needed.
-  - A green PR from a branch of this repo deploys to `yoy-fyi-test`; the latest PR wins. PRs from forks never reach the self-hosted runner.
+  - A green PR from a branch of this repo deploys to `yoy-fyi-test`; the latest PR wins. The workflow skips the deploy job for fork and bot PRs. That check alone is not enough on a public repo, because a fork PR runs the fork's copy of the workflow; the approval requirement above is what keeps unreviewed fork code off the runner.
   - A merge to `main` deploys to `yoy-fyi`.
   - Deploy steps: check out the commit, `docker compose build`, `docker compose up -d`, wait for `/health`, then smoke `/health` and one known redirect through the public URL.
 - Deploys never run from a laptop.
@@ -66,7 +66,7 @@ None for now; a separate decision later.
 - Hosting costs $0 beyond the electricity and internet already paid for.
 - Every short link, including printed QR codes, is down whenever the machine, its power or its internet is down. A UPS for the PC and router reduces this.
 - No backups: losing the VM disk loses every link and click. This is accepted for now.
-- `docker` group membership is root-equivalent on the VM, and the test deploy shares that Docker daemon with production. Any branch pushed to this repo, including its workflow file, can therefore read production secrets and data. Accepted: only Roman has write access, the repo is private, and fork and bot PRs never reach the runner. A collaborator with write access, or automated PRs, would require a separate test VM first.
+- `docker` group membership is root-equivalent on the VM, and the test deploy shares that Docker daemon with production. Any branch pushed to this repo, including its workflow file, can therefore read production secrets and data. Accepted: only Roman has write access, fork PR workflows run only after Roman approves them, and the deploy job skips fork and bot PRs. Approving a fork PR's workflow run means running that code next to production, so review it first. A collaborator with write access, or automated PRs, would require a separate test VM first.
 - Moving the zone to Cloudflare touches records the current Fly app uses.
 - If the residential plan forbids servers, or uptime becomes a problem, the same compose file runs on any Linux VM; only the tunnel token changes.
 
