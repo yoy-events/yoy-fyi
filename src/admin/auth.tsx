@@ -205,7 +205,7 @@ export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
         );
         if (!user) return refuse("This account is blocked.");
         await setUserSession(c, admin.sessionSecret, user.id, now());
-        return c.redirect("/", 303);
+        return c.redirect(flow.pending ? `/oauth/authorize?pending=${flow.pending}` : "/", 303);
       }
       if (String(claims.email).toLowerCase() !== admin.email.toLowerCase()) return refuse("That Google account cannot sign in here.");
       await setSession(c, admin, now());

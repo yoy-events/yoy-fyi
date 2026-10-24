@@ -51,6 +51,7 @@ function Page({ title, user, children }: { title: string; user?: User | null; ch
             yoy.fyi
           </a>
           {user && <a href="/account/keys">API keys</a>}
+          {user && <a href="/account/apps">Connected apps</a>}
           {user && (
             <form method="post" action="/logout">
               <button type="submit" class="link">
@@ -215,7 +216,12 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost }: Deps) 
     );
   });
 
-  app.get("/login/google", (c) => (admin.google ? startGoogle(c, { publicOrigin, admin, now }, "user") : c.notFound()));
+  // `pending` is an OAuth authorize request (an app connecting) to return to after signing in.
+  app.get("/login/google", (c) => {
+    if (!admin.google) return c.notFound();
+    const pending = c.req.query("pending") ?? "";
+    return startGoogle(c, { publicOrigin, admin, now }, "user", isUuid(pending) ? pending : null);
+  });
 
   app.post("/logout", (c) => {
     clearUserSession(c);
@@ -395,6 +401,53 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost }: Deps) 
       : [];
     if (!row) return c.notFound();
     return c.redirect("/account/keys", 303);
+  });
+
+  // OAuth connections from claude.ai, ChatGPT and other MCP clients to this user's service.
+  app.get("/account/apps", async (c) => {
+    const u = c.get("user");
+    const grants: { id: string; client: string; scopes: string[]; created_at: Date; last_used_at: Date | null }[] = await sql`
+      select g.id, coalesce(cl.name, g.client_id) as client, g.scopes, g.created_at, g.last_used_at
+      from oauth_grants g left join oauth_clients cl on cl.client_id = g.client_id
+      where g.service_id = ${u.serviceId} and g.revoked_at is null and g.refresh_expires_at > ${now()}
+      order by g.created_at desc`;
+    const when = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") : "never");
+    return c.html(
+      <Page title="Connected apps" user={u}>
+        <h1>Connected apps</h1>
+        <p>
+          To work with your links from a chat, add <code>{publicOrigin}/mcp</code> as a connector in claude.ai or ChatGPT and sign in
+          with the same Google account.
+        </p>
+        {grants.length > 0 && (
+          <ul class="list">
+            {grants.map((g) => (
+              <li>
+                <strong>{g.client}</strong>
+                <span class="meta">
+                  {g.scopes.join(", ")} · connected {when(g.created_at)} · last used {when(g.last_used_at)}
+                </span>
+                <form method="post" action={`/account/apps/${g.id}/revoke`}>
+                  <button type="submit" class="danger">
+                    Revoke
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Page>,
+    );
+  });
+
+  app.post("/account/apps/:id/revoke", async (c) => {
+    const u = c.get("user");
+    const id = c.req.param("id");
+    const [row] = isUuid(id)
+      ? await sql`update oauth_grants set revoked_at = coalesce(revoked_at, ${now()}) where id = ${id} and service_id = ${u.serviceId} returning id`
+      : [];
+    if (!row) return c.notFound();
+    return c.redirect("/account/apps", 303);
   });
 
   app.get("/privacy", async (c) =>

@@ -41,4 +41,4 @@ The first version of yoy.fyi had a home page where a signed-in person saw "My Li
 
 - **Google consent screen:** it must be published, out of testing mode, with a home page, a privacy policy and terms on yoy.fyi.
 - **Open sign-up invites phishing links.** The mitigations are the target policy, rate limits, blocking, and `created_via`/owner for bulk disable.
-- **MCP and OAuth stay admin-only for now.** Users reach `/mcp` with their own `yfi_` keys. OAuth consent for any user is a separate step.
+- **MCP and OAuth stay admin-only for now.** Users reach `/mcp` with their own `yfi_` keys. OAuth consent for any user is a separate step (done in ADR-0005).

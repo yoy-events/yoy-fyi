@@ -1,6 +1,7 @@
 // A minimal OAuth 2.1 authorization server for MCP clients in claude.ai and ChatGPT (ADR-0003).
 // Public clients identify themselves with a Client ID Metadata Document; there is no dynamic
-// registration. The only person who signs in is the admin, and each grant acts for one service.
+// registration. Each grant acts for one service: the admin picks any active service, a signed-in
+// user (ADR-0005) gets their own personal service and nothing else.
 import type { SQL } from "bun";
 import { type Context, Hono } from "hono";
 import { csrf } from "hono/csrf";
@@ -9,6 +10,7 @@ import { Layout } from "./admin/layout";
 import { isUuid } from "./http";
 import type { Caller } from "./keys";
 import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
+import { currentUser } from "./users";
 import { checkTarget } from "./target-policy";
 import { webhookUrlRejection } from "./webhooks";
 
@@ -130,6 +132,15 @@ export function oauthRoutes(deps: Deps) {
   const app = new Hono<Env>();
   const limitAuthorize = createRateLimiter(deps.authorizeLimit ?? { perMinute: 30, burst: 30 });
   const limitToken = createRateLimiter(deps.tokenLimit ?? { perMinute: 20, burst: 20 });
+  // Who is approving: the admin (any service) or a user (their own service only). Admin wins.
+  const approver = async (c: Context): Promise<{ services: { id: string; slug: string }[]; label: string } | null> => {
+    if (await adminSignedIn(c, deps)) {
+      return { services: await sql`select id, slug from services where disabled_at is null order by slug`, label: "the admin" };
+    }
+    const user = await currentUser(c, sql, deps.admin.sessionSecret, now());
+    if (!user) return null;
+    return { services: await sql`select id, slug from services where id = ${user.serviceId}`, label: user.email };
+  };
   const limited = (c: Context<Env>, limit: ReturnType<typeof createRateLimiter>) => {
     const ip = c.env?.ip;
     return ip ? !limit(rateLimitKey(ip)).ok : false;
@@ -182,10 +193,10 @@ export function oauthRoutes(deps: Deps) {
       400,
     );
 
-  async function consentPage(c: Context, pending: Pending) {
+  async function consentPage(c: Context, pending: Pending, who: { services: { id: string; slug: string }[]; label: string }) {
     const client = await loadClient(pending.client_id);
     if (!client) return errorPage(c, "The client could not be identified.");
-    const services = await sql`select id, slug from services where disabled_at is null order by slug`;
+    const { services } = who;
     const host = new URL(pending.redirect_uri).host;
     return c.html(
       <Layout title="Connect an app" signedIn>
@@ -193,6 +204,7 @@ export function oauthRoutes(deps: Deps) {
         <p>
           {client.name} asks to use yoy.fyi for one service. After you decide, you go back to <strong>{host}</strong>.
         </p>
+        <p class="meta">Signed in as {who.label}.</p>
         {services.length === 0 ? (
           <p class="notice">Create a service first: issue an API key for it in the admin.</p>
         ) : (
@@ -232,23 +244,31 @@ export function oauthRoutes(deps: Deps) {
     c.html(
       <Layout title="Sign in">
         <h1>Sign in to connect an app</h1>
-        <p>After signing in with the emailed link, you come back here to approve the connection.</p>
-        <LoginForm pending={pendingId} google={!!deps.admin.google} />
+        <p>After signing in, you come back here to approve the connection.</p>
+        {deps.admin.google && (
+          <a class="button" href={`/login/google?pending=${pendingId}`}>
+            Sign in with Google
+          </a>
+        )}
+        <details>
+          <summary>Admin sign-in</summary>
+          <LoginForm pending={pendingId} google={!!deps.admin.google} />
+        </details>
       </Layout>,
     );
 
   app.get("/oauth/authorize", async (c) => {
     if (limited(c, limitAuthorize)) return c.text("Too many requests", 429);
     const q = c.req.query();
-    const signedIn = await adminSignedIn(c, deps);
+    const who = await approver(c);
 
     // Coming back from the emailed sign-in link.
     if (q.pending !== undefined) {
-      if (!signedIn) return loginPage(c, q.pending);
+      if (!who) return loginPage(c, q.pending);
       const [pending]: Pending[] = isUuid(q.pending)
         ? await sql`select * from oauth_pending where id = ${q.pending} and expires_at > ${now()}`
         : [];
-      return pending ? consentPage(c, pending) : errorPage(c, "This request has expired. Start connecting again from the app.");
+      return pending ? consentPage(c, pending, who) : errorPage(c, "This request has expired. Start connecting again from the app.");
     }
 
     // Until the client and its redirect are verified, errors stay on this page (no open redirect).
@@ -284,11 +304,12 @@ export function oauthRoutes(deps: Deps) {
       values (${crypto.randomUUID()}, ${clientId}, ${redirectUri}, ${q.state ?? null}, ${q.code_challenge!},
               ${sql.array(scopes, "text")}, ${resource}, ${new Date(now().getTime() + PENDING_TTL_MS)})
       returning *`;
-    return signedIn ? consentPage(c, pending!) : loginPage(c, pending!.id);
+    return who ? consentPage(c, pending!, who) : loginPage(c, pending!.id);
   });
 
   app.post("/oauth/authorize", csrf({ origin: publicOrigin }), async (c) => {
-    if (!(await adminSignedIn(c, deps))) return c.text("Sign in first", 401);
+    const who = await approver(c);
+    if (!who) return c.text("Sign in first", 401);
     const form = await c.req.parseBody({ all: true });
     const one = (v: unknown) => (Array.isArray(v) ? String(v[0] ?? "") : String(v ?? ""));
     const pendingId = one(form.pending);
@@ -305,7 +326,7 @@ export function oauthRoutes(deps: Deps) {
     }
 
     const serviceId = one(form.service);
-    const [service] = isUuid(serviceId) ? await sql`select id from services where id = ${serviceId} and disabled_at is null` : [];
+    const service = who.services.find((s) => s.id === serviceId);
     const granted = [form.scope ?? []].flat().map(String);
     const scopesOk = granted.length > 0 && granted.every((s) => pending.scopes.includes(s));
     if (!service || !scopesOk) return errorPage(c, "Choose a service and at least one of the offered permissions.");
