@@ -101,9 +101,9 @@ describe("connecting an account", () => {
     expect((await sql`select telegram_user_id from users`)[0].telegram_user_id).toBeNull();
 
     await update("/confirm");
-    expect(lastText()).toContain("Connected to ann@example.com");
+    expect(lastText()).toContain("Підключено до ann@example.com");
     expect((await sql`select telegram_user_id from users`)[0].telegram_user_id).toBe(String(TG_USER));
-    expect(await (await get("/account/telegram")).text()).toContain("Connected");
+    expect(await (await get("/account/telegram")).text()).toContain("Підключено.");
   });
 
   test.each([
@@ -129,7 +129,7 @@ describe("connecting an account", () => {
 
   test("/start alone, or /confirm without a claimed token, links nothing", async () => {
     await update("/confirm");
-    expect(lastText()).toContain("Nothing to confirm");
+    expect(lastText()).toContain("Немає чого підтверджувати");
     expect(await sql`select 1 from users where telegram_user_id is not null`).toHaveLength(0);
   });
 
@@ -192,14 +192,14 @@ describe("shortening from Telegram", () => {
   ])("%s gets a hint and creates nothing", async (_, text) => {
     await connected();
     await update(text);
-    expect(lastText()).toContain("Send me a link");
+    expect(lastText()).toContain("Надішліть посилання");
     expect(await sql`select 1 from links`).toHaveLength(0);
   });
 
   test("a refused target is explained", async () => {
     await connected();
     await update("https://127.0.0.1/admin");
-    expect(lastText()).toContain("not allowed");
+    expect(lastText()).toContain("не дозволене");
     expect(await sql`select 1 from links`).toHaveLength(0);
   });
 
@@ -227,7 +227,7 @@ describe("shortening from Telegram", () => {
     for (let i = 0; i < 20; i++) await update(`https://example.com/${i}`);
     await update("https://example.com/21");
     expect(await sql`select 1 from links`).toHaveLength(20);
-    expect(lastText()).toContain("Too many");
+    expect(lastText()).toContain("Забагато");
   });
 });
 

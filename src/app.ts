@@ -66,7 +66,7 @@ const previewPage = (preview: Preview, shortUrl: string, location: string) => {
 };
 
 const page = (title: string, body: string) =>
-  `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body><h1>${title}</h1><p>${body}</p></body></html>`;
+  `<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body><h1>${title}</h1><p>${body}</p></body></html>`;
 
 export function createApp({
   sql,
@@ -154,15 +154,15 @@ export function createApp({
 
   app.get("/:code", async (c) => {
     const code = c.req.param("code");
-    if (!CODE.test(code)) return c.html(page("Not found", "This short link does not exist."), 404);
+    if (!CODE.test(code)) return c.html(page("Не знайдено", "Такого короткого посилання немає."), 404);
 
     // A blocked owner's service takes its links down too (ADR-0004).
     const [link]: LinkRow[] = await sql`
       select l.id, l.service_id, l.target_url, l.utm_defaults, l.preview, l.pass_click_id,
              (l.disabled_at is not null or l.expires_at <= now() or s.disabled_at is not null) as gone
       from links l join services s on s.id = l.service_id where l.code = ${code}`;
-    if (!link) return c.html(page("Not found", "This short link does not exist."), 404);
-    if (link.gone) return c.html(page("Link no longer available", "This short link was disabled or has expired."), 410);
+    if (!link) return c.html(page("Не знайдено", "Такого короткого посилання немає."), 404);
+    if (link.gone) return c.html(page("Посилання більше не працює", "Це коротке посилання вимкнене або його термін дії минув."), 410);
 
     const ip = c.env?.ip ?? null;
     if (ip) {
@@ -206,7 +206,7 @@ export function createApp({
     return c.redirect(location, 302);
   });
 
-  app.notFound((c) => c.html(page("Not found", "This short link does not exist."), 404));
+  app.notFound((c) => c.html(page("Не знайдено", "Такого короткого посилання немає."), 404));
 
   return app;
 }

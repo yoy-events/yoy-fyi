@@ -5,6 +5,7 @@ import { type Context, Hono } from "hono";
 import { type UnsafeUrls } from "./safe-browsing";
 import { createLink } from "./links";
 import { qrPng } from "./qr";
+import { REASON_UK } from "./uk";
 import { createRateLimiter } from "./ratelimit";
 
 export type TelegramApi = {
@@ -60,7 +61,7 @@ export function telegramRoutes({ sql, publicOrigin, telegram, now, resolveHost, 
   const ownHost = new URL(publicOrigin).hostname;
   const limitCreate = createRateLimiter({ perMinute: 20 / 60, burst: 20 });
   const secret = Buffer.from(telegram.webhookSecret);
-  const connectHint = `Connect your yoy.fyi account first: ${publicOrigin}/account/telegram`;
+  const connectHint = `Спершу підключіть акаунт yoy.fyi: ${publicOrigin}/account/telegram`;
 
   app.post("/telegram/webhook", async (c: Context) => {
     const given = Buffer.from(c.req.header("x-telegram-bot-api-secret-token") ?? "");
@@ -95,10 +96,10 @@ export function telegramRoutes({ sql, publicOrigin, telegram, now, resolveHost, 
           where t.token_hash = ${sha256(start[1])} and t.used_at is null and t.expires_at > ${at} and u.id = t.user_id
           returning u.email`;
       });
-      if (!claimed) return reply(chatId, `This connect link has expired. Open ${publicOrigin}/account/telegram and try again.`);
+      if (!claimed) return reply(chatId, `Це посилання для підключення вже не діє. Відкрийте ${publicOrigin}/account/telegram і спробуйте ще раз.`);
       return reply(
         chatId,
-        `This connects your Telegram to the yoy.fyi account ${claimed.email}. Links you send here will belong to that account. If it is yours, send /confirm. If not, ignore this.`,
+        `Це підключить ваш Telegram до акаунта yoy.fyi ${claimed.email}. Посилання, які ви надсилатимете сюди, належатимуть цьому акаунту. Якщо він ваш, надішліть /confirm. Якщо ні, просто проігноруйте.`,
       );
     }
     if (text === "/confirm") {
@@ -107,13 +108,13 @@ export function telegramRoutes({ sql, publicOrigin, telegram, now, resolveHost, 
         update telegram_connect_tokens set used_at = ${at}
         where claimed_by = ${fromId} and used_at is null and expires_at > ${at}
         returning user_id`;
-      if (!used) return reply(chatId, `Nothing to confirm. Open ${publicOrigin}/account/telegram to connect.`);
+      if (!used) return reply(chatId, `Немає чого підтверджувати. Відкрийте ${publicOrigin}/account/telegram, щоб підключитися.`);
       const [user] = await sql.begin(async (tx) => {
         await tx`update users set telegram_user_id = null where telegram_user_id = ${fromId}`;
         return tx`update users set telegram_user_id = ${fromId} where id = ${used.user_id} and disabled_at is null returning email`;
       });
-      if (!user) return reply(chatId, "This account cannot be connected.");
-      return reply(chatId, `Connected to ${user.email}. Send me a long link and I will shorten it.`);
+      if (!user) return reply(chatId, "Цей акаунт не можна підключити.");
+      return reply(chatId, `Підключено до ${user.email}. Надішліть мені довге посилання, і я його скорочу.`);
     }
 
     const [user] = await sql`
@@ -121,13 +122,13 @@ export function telegramRoutes({ sql, publicOrigin, telegram, now, resolveHost, 
       where u.telegram_user_id = ${fromId} and u.disabled_at is null and s.disabled_at is null`;
     if (!user) return reply(chatId, connectHint);
     const url = URL_IN_TEXT.exec(text)?.[0];
-    if (!url) return reply(chatId, "Send me a link that starts with https:// and I will shorten it.");
-    if (!limitCreate(user.id).ok) return reply(chatId, "Too many new links. Try again in an hour.");
+    if (!url) return reply(chatId, "Надішліть посилання, що починається з https://, і я його скорочу.");
+    if (!limitCreate(user.id).ok) return reply(chatId, "Забагато нових посилань. Спробуйте за годину.");
 
     const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, user.service_id, { target_url: url }, null, "telegram");
     if (result.kind === "error") {
-      const reason = result.details?.reason ? ` (${result.details.reason})` : "";
-      return reply(chatId, `${result.code === "target_rejected" ? "That link is not allowed" : result.message}${reason}.`);
+      const reason = String(result.details?.reason ?? "");
+      return reply(chatId, result.code === "target_rejected" ? `Це посилання не дозволене: ${REASON_UK[reason] ?? reason}.` : result.message);
     }
     const shortUrl = `${publicOrigin}/${result.row.code}`;
     await telegram.api.sendPhoto(chatId, await qrPng(shortUrl, { fg: "#000000", bg: "#ffffff", caption: null }), shortUrl);

@@ -30,7 +30,7 @@ export function parseCsv(text: string): string[][] | { error: string } {
       endRow();
     } else cell += ch;
   }
-  if (quoted) return { error: "Unclosed quote in the CSV." };
+  if (quoted) return { error: "У CSV не закрита лапка." };
   if (cell !== "" || row.length) endRow();
   return rows;
 }

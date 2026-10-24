@@ -99,7 +99,7 @@ describe("My links search", () => {
 
   test("a filter with no matches says so and keeps the search", async () => {
     const html = await (await get("/?q=nope")).text();
-    expect(html).toContain("No links match");
+    expect(html).toContain("Нічого не знайдено");
     expect(html).toContain('value="nope"');
   });
 

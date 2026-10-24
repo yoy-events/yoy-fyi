@@ -18,6 +18,7 @@ import { createRateLimiter } from "./ratelimit";
 import type { UnsafeUrls } from "./safe-browsing";
 import { checkTarget } from "./target-policy";
 import { issueConnectToken } from "./telegram";
+import { REASON_UK } from "./uk";
 import { type User, clearUserSession, currentUser } from "./users";
 
 const DAY = 86_400_000;
@@ -25,11 +26,43 @@ const MAX_KEYS = 10;
 // What a person may grant their own keys. Keys are managed here, never through keys:manage.
 const USER_SCOPES = ["links:read", "links:write", "analytics:read", "webhooks:manage"] as const satisfies readonly Scope[];
 const SCOPE_TEXT: Record<string, string> = {
-  "links:read": "Read links",
-  "links:write": "Create, change and disable links",
-  "analytics:read": "Read click analytics",
-  "webhooks:manage": "Manage click webhooks",
+  "links:read": "Читати посилання",
+  "links:write": "Створювати, змінювати й вимикати посилання",
+  "analytics:read": "Читати статистику кліків",
+  "webhooks:manage": "Керувати вебхуками кліків",
 };
+
+// The pages are in Ukrainian; the API and its error codes stay English (the contract).
+const STATUS_UK: Record<string, string> = { active: "активне", expired: "закінчилось", disabled: "вимкнене" };
+// Field names are kept in brackets, so the form and the API docs stay easy to match.
+const FIELD_UK: Record<string, string> = {
+  target_url: "Адреса (target_url): до 2048 символів",
+  code: "Свій код (code): 1–64 символи A-Z a-z 0-9 _ -",
+  title: "Назва (title): до 200 символів",
+  tags: "Теги (tags): до 20 різних тегів з a-z 0-9 _ : . -",
+  utm_defaults: "UTM (utm_defaults): некоректні значення",
+  preview: "Прев'ю (preview): потрібна назва до 200 символів, опис до 500, картинка — адреса https",
+  expires_at: "Діє до (expires_at): дата й час у майбутньому",
+  pass_click_id: "pass_click_id: так або ні",
+};
+const CODE_UK: Record<string, string> = {
+  code_reserved: "Цей код зарезервований.",
+  code_taken: "Цей код уже зайнятий.",
+  link_disabled: "Вимкнене посилання не можна змінити.",
+  idempotency_key_reused: "Повторний запит з іншими даними.",
+};
+
+// Ukrainian messages for a createLink / updateLink error.
+function errorList(r: { code: string; message: string; details?: Record<string, unknown> }): string[] {
+  const fields = (r.details?.fields ?? {}) as Record<string, string>;
+  if (Object.keys(fields).length) return Object.keys(fields).map((k) => FIELD_UK[k] ?? `${k}: некоректне значення`);
+  if (r.code === "target_rejected") {
+    const reason = String(r.details?.reason ?? "");
+    const what = r.details?.field === "preview.image" ? "Адреса картинки прев'ю не дозволена" : "Адреса не дозволена (not allowed)";
+    return [`${what}: ${REASON_UK[reason] ?? reason}.`];
+  }
+  return [CODE_UK[r.code] ?? r.message];
+}
 
 type Deps = {
   sql: SQL;
@@ -43,9 +76,16 @@ type Deps = {
 };
 type Env = { Variables: { user: User } };
 
-function Page({ title, user, og, children }: { title: string; user?: User | null; og?: { title: string; description?: string }; children: Child }) {
+// `bot` is the Telegram bot's username; without a bot the Telegram link is hidden.
+function Page({
+  title,
+  user,
+  og,
+  bot,
+  children,
+}: { title: string; user?: User | null; og?: { title: string; description?: string }; bot?: string; children: Child }) {
   return (
-    <html lang="en">
+    <html lang="uk">
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -60,21 +100,21 @@ function Page({ title, user, og, children }: { title: string; user?: User | null
           <a href="/" class="brand">
             yoy.fyi
           </a>
-          {user && <a href="/account/keys">API keys</a>}
-          {user && <a href="/account/apps">Connected apps</a>}
-          {user && <a href="/account/telegram">Telegram</a>}
-          {user && <a href="/account/bio">Bio page</a>}
+          {user && <a href="/account/keys">API-ключі</a>}
+          {user && <a href="/account/apps">Підключені застосунки</a>}
+          {user && bot && <a href="/account/telegram">Telegram</a>}
+          {user && <a href="/account/bio">Сторінка bio</a>}
           {user && (
             <form method="post" action="/logout">
               <button type="submit" class="link">
-                Sign out
+                Вийти
               </button>
             </form>
           )}
         </header>
         <main>{children}</main>
         <footer class="meta">
-          <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a>
+          <a href="/privacy">Конфіденційність</a> · <a href="/terms">Умови</a>
         </footer>
       </body>
     </html>
@@ -96,17 +136,17 @@ const OPTIONAL = ["title", "code", "tags", "utm_source", "utm_medium", "utm_camp
 function PreviewFields({ values }: { values: Record<string, string | undefined> }) {
   return (
     <fieldset>
-      <legend>Preview in Telegram, Facebook and other apps</legend>
+      <legend>Прев'ю в Telegram, Facebook та інших застосунках</legend>
       <label>
-        Preview title
+        Назва прев'ю
         <input name="preview_title" maxlength={200} value={values.preview_title ?? ""} />
       </label>
       <label>
-        Preview description
+        Опис прев'ю
         <input name="preview_description" maxlength={500} value={values.preview_description ?? ""} />
       </label>
       <label>
-        Preview image URL <span class="meta">https, 1200×630 or larger</span>
+        Адреса картинки прев'ю <span class="meta">https, від 1200×630</span>
         <input type="url" name="preview_image" value={values.preview_image ?? ""} placeholder="https://" />
       </label>
     </fieldset>
@@ -126,22 +166,22 @@ function CreateForm({ values = {}, errors = [] }: { values?: Record<string, stri
         </ul>
       )}
       <label>
-        Paste a long link
+        Вставте довге посилання
         <input type="url" name="target_url" required value={values.target_url ?? ""} placeholder="https://" />
       </label>
       <details open={open}>
-        <summary>More options</summary>
+        <summary>Більше параметрів</summary>
         <div class="stack">
           <label>
-            Title
+            Назва
             <input name="title" value={values.title ?? ""} maxlength={200} />
           </label>
           <label>
-            Custom code <span class="meta">yoy.fyi/your-code</span>
+            Свій код <span class="meta">yoy.fyi/ваш-код</span>
             <input name="code" value={values.code ?? ""} />
           </label>
           <label>
-            Tags <span class="meta">comma-separated</span>
+            Теги <span class="meta">через кому</span>
             <input name="tags" value={values.tags ?? ""} />
           </label>
           {(["utm_source", "utm_medium", "utm_campaign"] as const).map((k) => (
@@ -153,7 +193,7 @@ function CreateForm({ values = {}, errors = [] }: { values?: Record<string, stri
           <PreviewFields values={values} />
         </div>
       </details>
-      <button type="submit">Shorten</button>
+      <button type="submit">Скоротити</button>
     </form>
   );
 }
@@ -173,7 +213,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   // Pages need a session; form posts without one get 401 instead of a redirect.
   const signedIn = async (c: Context<Env>, next: () => Promise<void>) => {
     const u = await user(c);
-    if (!u) return c.req.method === "GET" ? c.redirect("/", 302) : c.text("Sign in first", 401);
+    if (!u) return c.req.method === "GET" ? c.redirect("/", 302) : c.text("Спершу увійдіть", 401);
     c.set("user", u);
     await next();
   };
@@ -204,53 +244,53 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
       select distinct unnest(tags) as tag from links where service_id = ${u.serviceId} order by tag limit 50`;
     const filtered = q !== "" || tag !== "";
     return c.html(
-      <Page title="My links" user={u}>
-        <h1>My links</h1>
+      <Page title="Мої посилання" user={u} bot={telegramBot}>
+        <h1>Мої посилання</h1>
         {created && (
           <section class="card stack created">
-            <h2>Your short link is ready</h2>
+            <h2>Коротке посилання готове</h2>
             <div class="row">
-              <input value={created.short_url} readonly aria-label="Short link" />
+              <input value={created.short_url} readonly aria-label="Коротке посилання" />
               <button type="button" data-copy={created.short_url}>
-                Copy
+                Копіювати
               </button>
             </div>
-            <img src={`/links/${created.id}/qr.svg`} alt={`QR code for ${created.short_url}`} class="qr" width="160" height="160" />
+            <img src={`/links/${created.id}/qr.svg`} alt={`QR-код для ${created.short_url}`} class="qr" width="160" height="160" />
             <p>
-              Download QR: <a href={`/links/${created.id}/qr.png`} download={`${created.code}.png`}>PNG</a> ·{" "}
+              Завантажити QR: <a href={`/links/${created.id}/qr.png`} download={`${created.code}.png`}>PNG</a> ·{" "}
               <a href={`/links/${created.id}/qr.svg`} download={`${created.code}.svg`}>SVG</a> ·{" "}
-              <a href={`/links/${created.id}`}>Stats</a>
+              <a href={`/links/${created.id}`}>Статистика</a>
             </p>
           </section>
         )}
         {links.length === 0 && !created && !filtered && (
           <p class="notice">
-            Create your first short link: paste a long URL below and get a short yoy.fyi link with a QR code and click
-            stats.
+            Створіть перше коротке посилання: вставте довгу адресу нижче й отримайте коротке посилання yoy.fyi з QR-кодом і
+            статистикою кліків.
           </p>
         )}
         <CreateForm values={form?.values} errors={form?.errors} />
         <p class="meta">
-          <a href="/links/import">Import from CSV</a>
+          <a href="/links/import">Імпорт із CSV</a>
           {links.length > 0 && (
             <>
               {" "}
-              · <a href="/links/export.csv">Export as CSV</a>
+              · <a href="/links/export.csv">Експорт у CSV</a>
             </>
           )}
         </p>
         {(links.length > 0 || filtered) && (
           <form method="get" action="/" class="row">
-            <input type="search" name="q" value={q} placeholder="Search links" aria-label="Search links" />
+            <input type="search" name="q" value={q} placeholder="Пошук посилань" aria-label="Пошук посилань" />
             {tag && <input type="hidden" name="tag" value={tag} />}
             <button type="submit" class="secondary">
-              Search
+              Шукати
             </button>
           </form>
         )}
         {tags.length > 0 && (
           <p class="meta">
-            Tags:{" "}
+            Теги:{" "}
             {tags.map((t) => (
               <>
                 <a href={`/?tag=${encodeURIComponent(t.tag)}`} class={t.tag === tag ? "badge active" : "badge"}>
@@ -258,10 +298,10 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
                 </a>{" "}
               </>
             ))}
-            {filtered && <a href="/">Show all</a>}
+            {filtered && <a href="/">Показати всі</a>}
           </p>
         )}
-        {filtered && links.length === 0 && <p class="notice">No links match.</p>}
+        {filtered && links.length === 0 && <p class="notice">Нічого не знайдено.</p>}
         {links.length > 0 && (
           <ul class="list">
             {links.map((row) => {
@@ -271,9 +311,9 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
                   <a href={`/links/${l.id}`}>{l.title ?? l.code}</a>
                   <span class="meta truncate">{l.target_url}</span>
                   <span class="meta">
-                    {l.short_url} · {row.clicks_7d} clicks in 7 days
+                    {l.short_url} · кліків за 7 днів: {row.clicks_7d}
                   </span>
-                  {l.status !== "active" && <span class={`badge ${l.status}`}>{l.status}</span>}
+                  {l.status !== "active" && <span class={`badge ${l.status}`}>{STATUS_UK[l.status]}</span>}
                 </li>
               );
             })}
@@ -289,14 +329,14 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     if (u) return home(c, u);
     return c.html(
       <Page title="yoy.fyi">
-        <h1>Short links and QR codes</h1>
-        <p>Turn long links into short yoy.fyi links, download a QR code for each, and see who clicks: by day, source, country and device.</p>
+        <h1>Короткі посилання та QR-коди</h1>
+        <p>Перетворюйте довгі посилання на короткі yoy.fyi, завантажуйте QR-код для кожного й дивіться, хто клікає: за днями, джерелами, країнами та пристроями.</p>
         {admin.google ? (
           <a class="button" href="/login/google">
-            Sign in with Google
+            Увійти через Google
           </a>
         ) : (
-          <p class="meta">Sign-in is not available right now.</p>
+          <p class="meta">Вхід зараз недоступний.</p>
         )}
       </Page>,
     );
@@ -317,14 +357,10 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   app.post("/links", async (c) => {
     const u = c.get("user");
     const values = Object.fromEntries(Object.entries(await c.req.parseBody()).map(([k, v]) => [k, String(v).trim()]));
-    if (!limitCreate(u.id).ok) return c.text("Too many new links. Try again in an hour.", 429);
+    if (!limitCreate(u.id).ok) return c.text("Забагато нових посилань. Спробуйте за годину.", 429);
     const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, u.serviceId, linkBody(values), null, "web");
     if (result.kind !== "error") return c.redirect(`/?created=${result.row.id}`, 303);
-    const fields = (result.details?.fields ?? {}) as Record<string, string>;
-    const errors = Object.keys(fields).length
-      ? Object.entries(fields).map(([k, v]) => `${k}: ${v}`)
-      : [result.details?.reason ? `${result.message} (${result.details.reason})` : result.message];
-    return home(c, u, { values, errors }, 422);
+    return home(c, u, { values, errors: errorList(result) }, 422);
   });
 
   // CSV import: up to MAX_IMPORT rows per file, each created like a link from the form.
@@ -335,23 +371,23 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   type ImportResult = { line: number; short_url?: string; error?: string };
   const importPage = (c: Context, u: User, opts: { error?: string; results?: ImportResult[] } = {}, status: 200 | 422 | 429 = 200) =>
     c.html(
-      <Page title="Import links" user={u}>
-        <h1>Import links from CSV</h1>
+      <Page title="Імпорт посилань" user={u} bot={telegramBot}>
+        <h1>Імпорт посилань із CSV</h1>
         <p>
-          The first line names the columns: <code>target_url</code> (required), <code>title</code>, <code>code</code> and{" "}
-          <code>tags</code> (comma-separated, in quotes). Up to {MAX_IMPORT} links per file.
+          Перший рядок — назви колонок: <code>target_url</code> (обов'язкова), <code>title</code>, <code>code</code> і{" "}
+          <code>tags</code> (через кому, в лапках). До {MAX_IMPORT} посилань в одному файлі.
         </p>
         {opts.error && <p class="notice">{opts.error}</p>}
         {opts.results && (
           <ul class="list">
             {opts.results.map((r) => (
               <li>
-                Line {r.line}:{" "}
+                Рядок {r.line}:{" "}
                 {r.short_url ? (
                   <>
-                    <input value={r.short_url} readonly aria-label={`Short link from line ${r.line}`} />{" "}
+                    <input value={r.short_url} readonly aria-label={`Коротке посилання з рядка ${r.line}`} />{" "}
                     <button type="button" data-copy={r.short_url}>
-                      Copy
+                      Копіювати
                     </button>
                   </>
                 ) : (
@@ -363,17 +399,17 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         )}
         <form method="post" action="/links/import" enctype="multipart/form-data" class="stack card">
           <label>
-            CSV file
+            CSV-файл
             <input type="file" name="file" accept=".csv,text/csv" />
           </label>
           <label>
-            or paste it here
+            або вставте його сюди
             <textarea name="csv" rows={8} placeholder={"target_url,title,tags\nhttps://example.com/,Example,\"a, b\""}></textarea>
           </label>
-          <button type="submit">Import</button>
+          <button type="submit">Імпортувати</button>
         </form>
         <p>
-          <a href="/links/export.csv">Download all your links as CSV</a>
+          <a href="/links/export.csv">Завантажити всі посилання в CSV</a>
         </p>
       </Page>,
       status,
@@ -382,21 +418,21 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   app.get("/links/import", (c) => importPage(c, c.get("user")));
 
   // The body limit and the rate limit both apply before the CSV is read or parsed.
-  app.post("/links/import", bodyLimit({ maxSize: 256 * 1024, onError: (c) => c.text("The CSV is larger than 256 KB.", 413) }), async (c) => {
+  app.post("/links/import", bodyLimit({ maxSize: 256 * 1024, onError: (c) => c.text("CSV більший за 256 КБ.", 413) }), async (c) => {
     const u = c.get("user");
-    if (!limitImport(u.id).ok) return importPage(c, u, { error: "Too many imports. Try again in an hour." }, 429);
+    if (!limitImport(u.id).ok) return importPage(c, u, { error: "Забагато імпортів. Спробуйте за годину." }, 429);
     const form = await c.req.parseBody();
     const text = form.file instanceof File && form.file.size > 0 ? await form.file.text() : String(form.csv ?? "");
     const parsed = parseCsv(text);
     if ("error" in parsed) return importPage(c, u, { error: parsed.error }, 422);
-    if (parsed.length === 0) return importPage(c, u, { error: "The CSV is empty." }, 422);
+    if (parsed.length === 0) return importPage(c, u, { error: "CSV порожній." }, 422);
     const [header, ...rows] = parsed as [string[], ...string[][]];
     const columns = header.map((h) => h.trim().toLowerCase());
     const unknown = columns.filter((h) => !IMPORT_COLUMNS.includes(h));
-    if (!columns.includes("target_url")) return importPage(c, u, { error: "The first line must name a target_url column." }, 422);
-    if (unknown.length) return importPage(c, u, { error: `Unknown columns: ${unknown.join(", ")}.` }, 422);
-    if (rows.length === 0) return importPage(c, u, { error: "The CSV has no rows after its header." }, 422);
-    if (rows.length > MAX_IMPORT) return importPage(c, u, { error: `At most ${MAX_IMPORT} links per import.` }, 422);
+    if (!columns.includes("target_url")) return importPage(c, u, { error: "У першому рядку має бути колонка target_url." }, 422);
+    if (unknown.length) return importPage(c, u, { error: `Невідомі колонки: ${unknown.join(", ")}.` }, 422);
+    if (rows.length === 0) return importPage(c, u, { error: "У CSV немає рядків після заголовка." }, 422);
+    if (rows.length > MAX_IMPORT) return importPage(c, u, { error: `Не більше ${MAX_IMPORT} посилань за один імпорт.` }, 422);
 
     const results: ImportResult[] = [];
     for (const [i, row] of rows.entries()) {
@@ -458,12 +494,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     expires_at: f.expires_at ? `${f.expires_at}:00Z` : null,
     preview: previewFrom(f),
   });
-  const errorList = (r: { message: string; details?: Record<string, unknown> }) => {
-    const fields = (r.details?.fields ?? {}) as Record<string, string>;
-    return Object.keys(fields).length
-      ? Object.entries(fields).map(([k, v]) => `${k}: ${v}`)
-      : [r.details?.reason ? `${r.message} (${r.details.reason})` : r.message];
-  };
+
 
   async function linkPage(c: Context, u: User, row: LinkRow, form?: { values: Record<string, string>; errors: string[] }, status: 200 | 409 | 422 = 200) {
     const link = toLink(row, publicOrigin, now());
@@ -490,26 +521,26 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
       (["referer_host", "country", "device"] as const).map((d) => breakdown(sql, scope, d, 5)),
     );
     return c.html(
-      <Page title={link.title ?? link.code} user={u}>
+      <Page title={link.title ?? link.code} user={u} bot={telegramBot}>
         <h1>{link.title ?? link.code}</h1>
         <div class="row">
-          <input value={link.short_url} readonly aria-label="Short link" />
+          <input value={link.short_url} readonly aria-label="Коротке посилання" />
           <button type="button" data-copy={link.short_url}>
-            Copy
+            Копіювати
           </button>
         </div>
         <p class="meta truncate">→ {link.target_url}</p>
         <details>
-          <summary>Links for channels</summary>
-          <p class="meta">The same short link with UTM tags, so clicks show where they came from.</p>
+          <summary>Посилання для каналів</summary>
+          <p class="meta">Те саме коротке посилання з UTM-мітками, щоб у статистиці було видно, звідки прийшли кліки.</p>
           <div class="stack">
             {CHANNELS.map(([name, source, medium]) => {
               const url = `${link.short_url}?utm_source=${source}&utm_medium=${medium}`;
               return (
                 <div class="row">
-                  <input value={url} readonly aria-label={`Short link for ${name}`} />
+                  <input value={url} readonly aria-label={`Коротке посилання для ${name}`} />
                   <button type="button" data-copy={url}>
-                    Copy for {name}
+                    Копіювати для {name}
                   </button>
                 </div>
               );
@@ -517,12 +548,12 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           </div>
         </details>
         <p>
-          <span class={`badge ${link.status}`}>{link.status}</span>
+          <span class={`badge ${link.status}`}>{STATUS_UK[link.status]}</span>
           {link.tags.length > 0 && <span class="meta"> · {link.tags.join(", ")}</span>}
         </p>
-        <img src={`/links/${link.id}/qr.svg${qrQuery}`} alt={`QR code for ${link.short_url}`} class="qr" width="160" height="160" />
+        <img src={`/links/${link.id}/qr.svg${qrQuery}`} alt={`QR-код для ${link.short_url}`} class="qr" width="160" height="160" />
         <p>
-          Download QR:{" "}
+          Завантажити QR:{" "}
           {!style.caption && (
             <>
               <a href={`/links/${link.id}/qr.png${qrQuery}`} download={`${link.code}.png`}>
@@ -536,41 +567,41 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           </a>
         </p>
         <details open={!!qrQuery || !!qrError}>
-          <summary>QR colours and caption</summary>
+          <summary>Кольори й підпис QR</summary>
           <form method="get" action={`/links/${link.id}`} class="stack card">
             {qrError && <p class="notice">{qrError}</p>}
             <div class="row">
               <label>
-                Code <input type="color" name="fg" value={style.fg} />
+                Код <input type="color" name="fg" value={style.fg} />
               </label>
               <label>
-                Background <input type="color" name="bg" value={style.bg} />
+                Фон <input type="color" name="bg" value={style.bg} />
               </label>
             </div>
             <label>
-              Caption under the code <span class="meta">SVG only, up to 40 characters</span>
-              <input name="caption" maxlength={40} value={style.caption ?? ""} placeholder="Scan me" />
+              Підпис під кодом <span class="meta">лише в SVG, до 40 символів</span>
+              <input name="caption" maxlength={40} value={style.caption ?? ""} placeholder="Скануй мене" />
             </label>
             <button type="submit" class="secondary">
-              Apply
+              Застосувати
             </button>
           </form>
         </details>
         <h2>
-          {daily.totals.clicks} clicks in 30 days <span class="meta">({daily.totals.uniques_upper_bound} visitors at most)</span>
+          Кліків за 30 днів: {daily.totals.clicks} <span class="meta">(відвідувачів щонайбільше {daily.totals.uniques_upper_bound})</span>
         </h2>
         <BarChart points={daily.points} label={(t) => t.toISOString().slice(0, 10)} />
         <p class="meta">
-          <a href={`/links/${link.id}/clicks.csv`}>Download clicks as CSV</a>
+          <a href={`/links/${link.id}/clicks.csv`}>Завантажити кліки в CSV</a>
         </p>
         <div class="rankings">
-          <Ranking title="Referrers" items={referrers!.items} total={referrers!.total_clicks} />
-          <Ranking title="Countries" items={countries!.items} total={countries!.total_clicks} />
-          <Ranking title="Devices" items={devices!.items} total={devices!.total_clicks} />
+          <Ranking title="Джерела" items={referrers!.items} total={referrers!.total_clicks} />
+          <Ranking title="Країни" items={countries!.items} total={countries!.total_clicks} />
+          <Ranking title="Пристрої" items={devices!.items} total={devices!.total_clicks} />
         </div>
         {link.status !== "disabled" && (
           <details open={!!form}>
-            <summary>Edit link</summary>
+            <summary>Редагувати посилання</summary>
             <form method="post" action={`/links/${link.id}`} class="stack card">
               {form && form.errors.length > 0 && (
                 <ul class="errors">
@@ -580,23 +611,23 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
                 </ul>
               )}
               <label>
-                Where it goes
+                Куди веде
                 <input type="url" name="target_url" required value={values.target_url} />
               </label>
               <label>
-                Title
+                Назва
                 <input name="title" maxlength={200} value={values.title} />
               </label>
               <label>
-                Tags <span class="meta">comma-separated</span>
+                Теги <span class="meta">через кому</span>
                 <input name="tags" value={values.tags} />
               </label>
               <label>
-                Expires <span class="meta">UTC, empty for never</span>
+                Діє до <span class="meta">UTC, порожньо — безстроково</span>
                 <input type="datetime-local" name="expires_at" value={values.expires_at} />
               </label>
               <PreviewFields values={values} />
-              <button type="submit">Save</button>
+              <button type="submit">Зберегти</button>
             </form>
           </details>
         )}
@@ -604,15 +635,15 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         {link.status !== "disabled" ? (
           <form method="post" action={`/links/${link.id}/disable`}>
             <button type="submit" class="danger">
-              Disable link
+              Вимкнути посилання
             </button>
           </form>
         ) : row.disabled_by === "owner" ? (
           <form method="post" action={`/links/${link.id}/enable`}>
-            <button type="submit">Enable link</button>
+            <button type="submit">Увімкнути посилання</button>
           </form>
         ) : (
-          <p class="meta">yoy.fyi disabled this link. Contact {admin.email} if you think that is a mistake.</p>
+          <p class="meta">Це посилання вимкнув yoy.fyi. Якщо це помилка, напишіть на {admin.email}.</p>
         )}
       </Page>,
       status,
@@ -644,10 +675,10 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     const row = await ownLink(u, c.req.param("id"));
     if (!row) return c.notFound();
     if (row.disabled_at) {
-      const refuse = (why: string) => linkPage(c, u, row, { values: {}, errors: [`This link cannot be enabled: ${why}.`] }, 422);
-      if (row.disabled_by !== "owner") return refuse("it was disabled by yoy.fyi");
+      const refuse = (why: string) => linkPage(c, u, row, { values: {}, errors: [`Це посилання не можна увімкнути: ${why}.`] }, 422);
+      if (row.disabled_by !== "owner") return refuse("його вимкнув yoy.fyi");
       const rejection = await checkTarget(row.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
-      if (rejection) return refuse(`its target is not allowed (${rejection})`);
+      if (rejection) return refuse(`адреса не дозволена: ${REASON_UK[rejection] ?? rejection}`);
       await sql`
         update links set disabled_at = null, disabled_by = null, updated_at = ${now()}
         where id = ${row.id} and service_id = ${u.serviceId} and disabled_by = 'owner'`;
@@ -668,7 +699,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     if (!row) return c.notFound();
     const style = qrOptions(new URL(c.req.url).searchParams);
     if ("error" in style) return c.text(style.error, 400);
-    if (style.caption) return c.text("A caption is available in the SVG only", 400);
+    if (style.caption) return c.text("Підпис доступний лише в SVG", 400);
     return c.body(await qrPng(`${publicOrigin}/${row.code}`, style), 200, { "Content-Type": "image/png" });
   });
 
@@ -687,19 +718,19 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
       select id, name, prefix, scopes, created_at, last_used_at from api_keys
       where service_id = ${u.serviceId} and revoked_at is null order by created_at desc`;
     return c.html(
-      <Page title="API keys" user={u}>
-        <h1>API keys</h1>
+      <Page title="API-ключі" user={u} bot={telegramBot}>
+        <h1>API-ключі</h1>
         <p>
-          Use a key with the <a href="/v1/openapi.json">yoy.fyi API</a> or the MCP server at <code>{publicOrigin}/mcp</code>. Keys act
-          only on your own links.
+          Ключ працює з <a href="/v1/openapi.json">API yoy.fyi</a> або MCP-сервером <code>{publicOrigin}/mcp</code>. Ключі діють
+          лише на ваші посилання.
         </p>
         {opts.secret && (
           <p class="notice">
-            Your new key, shown only now: <code>{opts.secret}</code>
+            Ваш новий ключ, показуємо лише зараз: <code>{opts.secret}</code>
           </p>
         )}
         <form method="post" action="/account/keys" class="stack card">
-          <h2>New key</h2>
+          <h2>Новий ключ</h2>
           {opts.errors && opts.errors.length > 0 && (
             <ul class="errors">
               {opts.errors.map((e) => (
@@ -708,18 +739,18 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
             </ul>
           )}
           <label>
-            Name
-            <input name="name" required maxlength={100} placeholder="my app" />
+            Назва
+            <input name="name" required maxlength={100} placeholder="мій застосунок" />
           </label>
           <fieldset>
-            <legend>Permissions</legend>
+            <legend>Дозволи</legend>
             {USER_SCOPES.map((s) => (
               <label class="check">
                 <input type="checkbox" name="scope" value={s} checked={s !== "webhooks:manage"} /> {SCOPE_TEXT[s]}
               </label>
             ))}
           </fieldset>
-          <button type="submit">Create key</button>
+          <button type="submit">Створити ключ</button>
         </form>
         {keys.length > 0 && (
           <ul class="list">
@@ -727,11 +758,11 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
               <li>
                 <strong>{k.name}</strong> <code>yfi_{k.prefix}_…</code>
                 <span class="meta">
-                  {k.scopes.join(", ")} · last used {k.last_used_at ? k.last_used_at.toISOString().slice(0, 16).replace("T", " ") : "never"}
+                  {k.scopes.join(", ")} · останнє використання {k.last_used_at ? k.last_used_at.toISOString().slice(0, 16).replace("T", " ") : "ніколи"}
                 </span>
                 <form method="post" action={`/account/keys/${k.id}/revoke`}>
                   <button type="submit" class="danger">
-                    Revoke
+                    Відкликати
                   </button>
                 </form>
               </li>
@@ -751,12 +782,12 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     const name = String([form.name].flat()[0] ?? "").trim();
     const scopes = [form.scope ?? []].flat().map(String);
     const errors: string[] = [];
-    if (name.length < 1 || name.length > 100) errors.push("Name: 1-100 characters.");
+    if (name.length < 1 || name.length > 100) errors.push("Назва: 1–100 символів.");
     if (scopes.length === 0 || !scopes.every((s) => (USER_SCOPES as readonly string[]).includes(s)) || new Set(scopes).size !== scopes.length) {
-      errors.push("Choose at least one of the listed permissions.");
+      errors.push("Оберіть хоча б один дозвіл зі списку.");
     }
     const [{ active }] = await sql`select count(*)::int as active from api_keys where service_id = ${u.serviceId} and revoked_at is null`;
-    if (active >= MAX_KEYS) errors.push(`You can have at most ${MAX_KEYS} active keys. Revoke one first.`);
+    if (active >= MAX_KEYS) errors.push(`Можна мати не більше ${MAX_KEYS} активних ключів. Спершу відкличте один.`);
     if (errors.length) return keysPage(c, u, { errors }, 422);
     const [service] = await sql`select slug from services where id = ${u.serviceId}`;
     const { token } = await issueKey(sql, { serviceSlug: service.slug, name, scopes: scopes as Scope[] });
@@ -784,9 +815,9 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     const v = values ?? { handle: page?.handle ?? "", title: page?.title ?? "", description: page?.description ?? "", link: page?.link_ids ?? [] };
     const links: LinkRow[] = await sql`select * from links where service_id = ${u.serviceId} and disabled_at is null order by id desc limit 200`;
     return c.html(
-      <Page title="Bio page" user={u}>
-        <h1>Bio page</h1>
-        <p>One page with your links to put in an Instagram or Telegram bio{page && <> : <a href={`/@${page.handle}`}>{`${publicOrigin}/@${page.handle}`}</a></>}.</p>
+      <Page title="Сторінка bio" user={u} bot={telegramBot}>
+        <h1>Сторінка bio</h1>
+        <p>Одна сторінка з вашими посиланнями для bio в Instagram чи Telegram{page && <> : <a href={`/@${page.handle}`}>{`${publicOrigin}/@${page.handle}`}</a></>}.</p>
         <form method="post" action="/account/bio" class="stack card">
           {errors.length > 0 && (
             <ul class="errors">
@@ -796,20 +827,20 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
             </ul>
           )}
           <label>
-            Address <span class="meta">{publicOrigin}/@…, 3-30 of a-z 0-9 _ . -</span>
+            Адреса <span class="meta">{publicOrigin}/@…, 3–30 символів a-z 0-9 _ . -</span>
             <input name="handle" required maxlength={30} value={v.handle} />
           </label>
           <label>
-            Title
+            Заголовок
             <input name="title" maxlength={100} value={v.title} />
           </label>
           <label>
-            Description
+            Опис
             <input name="description" maxlength={300} value={v.description} />
           </label>
           <fieldset>
-            <legend>Links, newest first</legend>
-            {links.length === 0 && <p class="meta">Create a short link first.</p>}
+            <legend>Посилання, нові спершу</legend>
+            {links.length === 0 && <p class="meta">Спершу створіть коротке посилання.</p>}
             {links.map((l) => (
               <label class="check">
                 <input type="checkbox" name="link" value={l.id} checked={v.link.includes(l.id)} /> {l.title ?? l.code}{" "}
@@ -817,7 +848,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
               </label>
             ))}
           </fieldset>
-          <button type="submit">Save</button>
+          <button type="submit">Зберегти</button>
         </form>
       </Page>,
       errors.length ? 422 : 200,
@@ -832,18 +863,18 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     const one = (k: string) => String([form[k] ?? ""].flat()[0] ?? "").trim();
     const values = { handle: one("handle").toLowerCase(), title: one("title"), description: one("description"), link: [form.link ?? []].flat().map(String) };
     const errors: string[] = [];
-    if (!HANDLE.test(values.handle)) errors.push("Address (handle): 3-30 characters of a-z 0-9 _ . - starting with a letter or digit.");
-    if (values.title.length > 100) errors.push("Title: at most 100 characters.");
-    if (values.description.length > 300) errors.push("Description: at most 300 characters.");
-    if (values.link.length > MAX_BIO_LINKS) errors.push(`At most ${MAX_BIO_LINKS} links.`);
+    if (!HANDLE.test(values.handle)) errors.push("Адреса (handle): 3–30 символів a-z 0-9 _ . -, починається з літери чи цифри.");
+    if (values.title.length > 100) errors.push("Заголовок (title): не більше 100 символів.");
+    if (values.description.length > 300) errors.push("Опис (description): не більше 300 символів.");
+    if (values.link.length > MAX_BIO_LINKS) errors.push(`Не більше ${MAX_BIO_LINKS} посилань.`);
     else if (values.link.length) {
       const own = values.link.every(isUuid) ? await sql`select id from links where service_id = ${u.serviceId} and id in ${sql(values.link)}` : [];
-      if (own.length !== new Set(values.link).size) errors.push("Choose only your own links.");
+      if (own.length !== new Set(values.link).size) errors.push("Обирайте лише свої посилання.");
     }
-    if (!errors.length && RESERVED_HANDLES.has(values.handle)) errors.push(`${publicOrigin}/@${values.handle} is taken.`);
+    if (!errors.length && RESERVED_HANDLES.has(values.handle)) errors.push(`${publicOrigin}/@${values.handle} уже зайнята (taken).`);
     if (!errors.length) {
       const [taken] = await sql`select 1 from bio_pages where handle = ${values.handle} and user_id <> ${u.id}`;
-      if (taken) errors.push(`${publicOrigin}/@${values.handle} is taken.`);
+      if (taken) errors.push(`${publicOrigin}/@${values.handle} уже зайнята (taken).`);
     }
     if (errors.length) return bioForm(c, u, values, errors);
     await sql`
@@ -889,23 +920,23 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     if (!telegramBot) return c.notFound();
     const [row] = await sql`select telegram_user_id from users where id = ${u.id}`;
     return c.html(
-      <Page title="Telegram" user={u}>
-        <h1>Telegram bot</h1>
+      <Page title="Telegram" user={u} bot={telegramBot}>
+        <h1>Telegram-бот</h1>
         <p>
-          Send a long link to <a href={`https://t.me/${telegramBot}`}>@{telegramBot}</a> and get the short yoy.fyi link and its QR back.
+          Надішліть довге посилання боту <a href={`https://t.me/${telegramBot}`}>@{telegramBot}</a> й отримайте коротке посилання yoy.fyi та його QR.
         </p>
         {row?.telegram_user_id ? (
           <>
-            <p class="notice">Connected.</p>
+            <p class="notice">Підключено.</p>
             <form method="post" action="/account/telegram/disconnect">
               <button type="submit" class="secondary">
-                Disconnect
+                Відключити
               </button>
             </form>
           </>
         ) : (
           <form method="post" action="/account/telegram/connect">
-            <button type="submit">Connect Telegram</button>
+            <button type="submit">Підключити Telegram</button>
           </form>
         )}
       </Page>,
@@ -931,13 +962,13 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
       from oauth_grants g left join oauth_clients cl on cl.client_id = g.client_id
       where g.service_id = ${u.serviceId} and g.revoked_at is null and g.refresh_expires_at > ${now()}
       order by g.created_at desc`;
-    const when = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") : "never");
+    const when = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") : "ніколи");
     return c.html(
-      <Page title="Connected apps" user={u}>
-        <h1>Connected apps</h1>
+      <Page title="Підключені застосунки" user={u} bot={telegramBot}>
+        <h1>Підключені застосунки</h1>
         <p>
-          To work with your links from a chat, add <code>{publicOrigin}/mcp</code> as a connector in claude.ai or ChatGPT and sign in
-          with the same Google account.
+          Щоб працювати з посиланнями з чату, додайте <code>{publicOrigin}/mcp</code> як конектор у claude.ai чи ChatGPT і ввійдіть
+          тим самим Google-акаунтом.
         </p>
         {grants.length > 0 && (
           <ul class="list">
@@ -945,11 +976,11 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
               <li>
                 <strong>{g.client}</strong>
                 <span class="meta">
-                  {g.scopes.join(", ")} · connected {when(g.created_at)} · last used {when(g.last_used_at)}
+                  {g.scopes.join(", ")} · підключено {when(g.created_at)} · останнє використання {when(g.last_used_at)}
                 </span>
                 <form method="post" action={`/account/apps/${g.id}/revoke`}>
                   <button type="submit" class="danger">
-                    Revoke
+                    Відкликати
                   </button>
                 </form>
               </li>
@@ -972,42 +1003,42 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
 
   app.get("/privacy", async (c) =>
     c.html(
-      <Page title="Privacy" user={await user(c)}>
-        <h1>Privacy at yoy.fyi</h1>
-        <p>yoy.fyi makes short links and counts their clicks. This page says what it stores and for how long.</p>
-        <h2>Your account</h2>
+      <Page title="Конфіденційність" user={await user(c)} bot={telegramBot}>
+        <h1>Конфіденційність на yoy.fyi</h1>
+        <p>yoy.fyi створює короткі посилання й рахує кліки по них. Тут написано, що він зберігає і як довго.</p>
+        <h2>Ваш акаунт</h2>
         <p>
-          When you sign in with Google, yoy.fyi receives and keeps your Google account id, email address and name. It uses them only
-          to sign you in and to show whose links are whose. It does not read anything else from your Google account.
+          Коли ви входите через Google, yoy.fyi отримує й зберігає id вашого Google-акаунта, адресу пошти та ім'я. Вони потрібні лише для
+          входу й щоб показувати, чиї посилання чиї. Нічого іншого з вашого Google-акаунта yoy.fyi не читає.
         </p>
-        <h2>Clicks on short links</h2>
+        <h2>Кліки по коротких посиланнях</h2>
         <p>
-          For each click yoy.fyi stores the time, the referring site, UTM and ad-click parameters, the browser, operating system and
-          device type, the country (derived from the IP address, which is not stored), and a daily-changing hash used to count
-          unique visitors. Raw clicks are kept for 13 months; daily totals are kept after that.
+          Для кожного кліку yoy.fyi зберігає час, сайт, з якого прийшли, UTM-мітки й рекламні параметри, браузер, операційну систему й
+          тип пристрою, країну (визначену за IP-адресою, яка не зберігається) і хеш, що змінюється щодня, для підрахунку унікальних
+          відвідувачів. Окремі кліки зберігаються 13 місяців, після цього лишаються лише денні підсумки.
         </p>
-        <h2>Sharing</h2>
+        <h2>Кому це видно</h2>
         <p>
-          The owner of a link sees its click statistics. If the owner set up a webhook, the click details above (never an IP
-          address) are sent to it. yoy.fyi sells nothing to anyone.
+          Статистику посилання бачить його власник. Якщо власник налаштував вебхук, туди надсилаються описані вище дані кліку (ніколи не
+          IP-адреса). yoy.fyi нічого нікому не продає.
         </p>
-        <h2>Contact</h2>
-        <p>Questions or deletion requests: {admin.email}.</p>
+        <h2>Контакти</h2>
+        <p>Питання чи запити на видалення: {admin.email}.</p>
       </Page>,
     ),
   );
 
   app.get("/terms", async (c) =>
     c.html(
-      <Page title="Terms" user={await user(c)}>
-        <h1>Terms of use for yoy.fyi</h1>
-        <p>yoy.fyi is offered as is, free of charge, without any guarantee of availability.</p>
+      <Page title="Умови" user={await user(c)} bot={telegramBot}>
+        <h1>Умови користування yoy.fyi</h1>
+        <p>yoy.fyi надається як є, безкоштовно, без жодних гарантій доступності.</p>
         <p>
-          Do not create links to phishing, malware, scams, spam or anything illegal. Links and accounts that break this rule are
-          disabled without notice.
+          Не створюйте посилань на фішинг, шкідливі програми, шахрайство, спам чи будь-що незаконне. Посилання й акаунти, що порушують
+          це правило, вимикаються без попередження.
         </p>
-        <p>Short links can be disabled at any time; a disabled code is never given to anyone else.</p>
-        <p>Contact: {admin.email}.</p>
+        <p>Короткі посилання можуть бути вимкнені будь-коли; код вимкненого посилання ніколи не передається іншим.</p>
+        <p>Контакти: {admin.email}.</p>
       </Page>,
     ),
   );

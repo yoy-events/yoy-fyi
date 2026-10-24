@@ -22,9 +22,9 @@ export type FetchClientMetadata = (clientId: string) => Promise<ClientMetadata |
 // refused and logged, so a new legitimate host shows up in the logs before it is added here.
 const CLIENT_HOSTS = ["claude.ai", "claude.com", "anthropic.com", "chatgpt.com", "openai.com"];
 const SCOPE_TEXT: Record<string, string> = {
-  "links:read": "List and read short links",
-  "analytics:read": "Read click analytics",
-  "links:write": "Create, change and disable short links",
+  "links:read": "Переглядати й читати короткі посилання",
+  "analytics:read": "Читати статистику кліків",
+  "links:write": "Створювати, змінювати й вимикати короткі посилання",
 };
 
 const PENDING_TTL_MS = 10 * 60_000;
@@ -186,8 +186,8 @@ export function oauthRoutes(deps: Deps) {
 
   const errorPage = (c: Context, message: string) =>
     c.html(
-      <Layout title="Cannot connect">
-        <h1>This connection request cannot be used</h1>
+      <Layout title="Не вдалося підключити">
+        <h1>Цей запит на підключення не можна використати</h1>
         <p>{message}</p>
       </Layout>,
       400,
@@ -195,23 +195,23 @@ export function oauthRoutes(deps: Deps) {
 
   async function consentPage(c: Context, pending: Pending, who: { services: { id: string; slug: string }[]; label: string }) {
     const client = await loadClient(pending.client_id);
-    if (!client) return errorPage(c, "The client could not be identified.");
+    if (!client) return errorPage(c, "Не вдалося визначити застосунок.");
     const { services } = who;
     const host = new URL(pending.redirect_uri).host;
     return c.html(
-      <Layout title="Connect an app" signedIn>
-        <h1>Connect {client.name}</h1>
+      <Layout title="Підключити застосунок" signedIn>
+        <h1>Підключити {client.name}</h1>
         <p>
-          {client.name} asks to use yoy.fyi for one service. After you decide, you go back to <strong>{host}</strong>.
+          {client.name} просить доступ до yoy.fyi для одного сервісу. Після рішення ви повернетеся на <strong>{host}</strong>.
         </p>
-        <p class="meta">Signed in as {who.label}.</p>
+        <p class="meta">Ви ввійшли як {who.label}.</p>
         {services.length === 0 ? (
-          <p class="notice">Create a service first: issue an API key for it in the admin.</p>
+          <p class="notice">Спершу створіть сервіс: випустіть для нього API-ключ в адмінці.</p>
         ) : (
           <form method="post" action="/oauth/authorize" class="stack card">
             <input type="hidden" name="pending" value={pending.id} />
             <fieldset>
-              <legend>Service</legend>
+              <legend>Сервіс</legend>
               {services.map((s: { id: string; slug: string }, i: number) => (
                 <label>
                   <input type="radio" name="service" value={s.id} checked={i === 0} required /> {s.slug}
@@ -219,7 +219,7 @@ export function oauthRoutes(deps: Deps) {
               ))}
             </fieldset>
             <fieldset>
-              <legend>Permissions</legend>
+              <legend>Дозволи</legend>
               {pending.scopes.map((scope) => (
                 <label>
                   <input type="checkbox" name="scope" value={scope} checked={scope !== "links:write"} /> {SCOPE_TEXT[scope]}
@@ -228,10 +228,10 @@ export function oauthRoutes(deps: Deps) {
             </fieldset>
             <div class="row">
               <button type="submit" name="decision" value="approve">
-                Allow
+                Дозволити
               </button>
               <button type="submit" name="decision" value="deny" class="secondary">
-                Deny
+                Відмовити
               </button>
             </div>
           </form>
@@ -242,16 +242,16 @@ export function oauthRoutes(deps: Deps) {
 
   const loginPage = (c: Context, pendingId: string) =>
     c.html(
-      <Layout title="Sign in">
-        <h1>Sign in to connect an app</h1>
-        <p>After signing in, you come back here to approve the connection.</p>
+      <Layout title="Вхід">
+        <h1>Увійдіть, щоб підключити застосунок</h1>
+        <p>Після входу ви повернетеся сюди, щоб підтвердити підключення.</p>
         {deps.admin.google && (
           <a class="button" href={`/login/google?pending=${pendingId}`}>
-            Sign in with Google
+            Увійти через Google
           </a>
         )}
         <details>
-          <summary>Admin sign-in</summary>
+          <summary>Вхід для адміністратора</summary>
           <LoginForm pending={pendingId} google={!!deps.admin.google} />
         </details>
       </Layout>,
@@ -268,7 +268,7 @@ export function oauthRoutes(deps: Deps) {
       const [pending]: Pending[] = isUuid(q.pending)
         ? await sql`select * from oauth_pending where id = ${q.pending} and expires_at > ${now()}`
         : [];
-      return pending ? consentPage(c, pending, who) : errorPage(c, "This request has expired. Start connecting again from the app.");
+      return pending ? consentPage(c, pending, who) : errorPage(c, "Термін дії запиту минув. Почніть підключення знову із застосунку.");
     }
 
     // Until the client and its redirect are verified, errors stay on this page (no open redirect).
@@ -282,11 +282,11 @@ export function oauthRoutes(deps: Deps) {
     }
     if (clientUrl.protocol !== "https:" || !hostAllowed(clientUrl.hostname)) {
       console.warn("oauth client host refused", { host: clientUrl.hostname });
-      return errorPage(c, "This app is not allowed to connect.");
+      return errorPage(c, "Цьому застосунку не дозволено підключатися.");
     }
     const client = await loadClient(clientId);
-    if (!client) return errorPage(c, "The client's metadata document could not be read.");
-    if (!redirectUri || !redirectAllowed(client.redirect_uris, redirectUri)) return errorPage(c, "The redirect URI is not one the client declared.");
+    if (!client) return errorPage(c, "Не вдалося прочитати опис застосунку.");
+    if (!redirectUri || !redirectAllowed(client.redirect_uris, redirectUri)) return errorPage(c, "Адреса повернення не збігається з тією, яку оголосив застосунок.");
 
     const fail = (error: string, description: string) =>
       c.redirect(withParams(redirectUri, { error, error_description: description, state: q.state, iss: publicOrigin }), 302);
@@ -316,7 +316,7 @@ export function oauthRoutes(deps: Deps) {
     const [pending]: Pending[] = isUuid(pendingId)
       ? await sql`select * from oauth_pending where id = ${pendingId} and expires_at > ${now()}`
       : [];
-    if (!pending) return errorPage(c, "This request has expired or was already answered. Start connecting again from the app.");
+    if (!pending) return errorPage(c, "Термін дії запиту минув або на нього вже відповіли. Почніть підключення знову із застосунку.");
     const back = (params: Record<string, string>) =>
       c.redirect(withParams(pending.redirect_uri, { ...params, state: pending.state ?? undefined, iss: publicOrigin }), 303);
 
@@ -329,11 +329,11 @@ export function oauthRoutes(deps: Deps) {
     const service = who.services.find((s) => s.id === serviceId);
     const granted = [form.scope ?? []].flat().map(String);
     const scopesOk = granted.length > 0 && granted.every((s) => pending.scopes.includes(s));
-    if (!service || !scopesOk) return errorPage(c, "Choose a service and at least one of the offered permissions.");
+    if (!service || !scopesOk) return errorPage(c, "Оберіть сервіс і хоча б один із запропонованих дозволів.");
 
     const code = random();
     const [deleted] = await sql`delete from oauth_pending where id = ${pending.id} returning id`;
-    if (!deleted) return errorPage(c, "This request was already answered.");
+    if (!deleted) return errorPage(c, "На цей запит уже відповіли.");
     await sql`
       insert into oauth_codes (code_hash, client_id, service_id, scopes, redirect_uri, code_challenge, resource, expires_at)
       values (${sha256(code)}, ${pending.client_id}, ${service.id}, ${sql.array(granted, "text")}, ${pending.redirect_uri},

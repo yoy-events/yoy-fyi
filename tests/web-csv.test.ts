@@ -77,8 +77,8 @@ describe("import", () => {
 
   test("a bad row is reported with its line number while the good rows are created", async () => {
     const html = await (await importCsv("target_url,code\nhttps://example.com/a,one\nftp://example.com/x,two\nhttps://example.com/c,one\n")).text();
-    expect(html).toContain("Line 3");
-    expect(html).toContain("Line 4");
+    expect(html).toContain("Рядок 3");
+    expect(html).toContain("Рядок 4");
     expect((await links()).map((l: { code: string }) => l.code)).toEqual(["one"]);
   });
 
@@ -91,12 +91,12 @@ describe("import", () => {
   });
 
   test.each([
-    ["nothing", "", "empty"],
-    ["only blank lines", "\n\n", "empty"],
-    ["a header only", "target_url\n", "no rows"],
+    ["nothing", "", "порожній"],
+    ["only blank lines", "\n\n", "порожній"],
+    ["a header only", "target_url\n", "немає рядків"],
     ["no target_url column", "title\nHello\n", "target_url"],
     ["an unknown column", "target_url,colour\nhttps://example.com/,red\n", "colour"],
-    ["an unclosed quote", 'target_url\n"https://example.com/', "Unclosed quote"],
+    ["an unclosed quote", 'target_url\n"https://example.com/', "не закрита лапка"],
     ["more than 100 rows", `target_url\n${"https://example.com/\n".repeat(101)}`, "100"],
   ])("%s is refused with 422 and nothing is created", async (_, csv, message) => {
     const res = await importCsv(csv);
