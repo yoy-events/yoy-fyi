@@ -65,6 +65,12 @@ const LINK_FIELDS = {
     type: "object",
     description: "utm_source, utm_medium, utm_campaign, utm_term, utm_content added on redirect when absent",
   },
+  preview: {
+    type: "object",
+    description: "What Telegram, Facebook and other link previews show: title, optional description and image (https URL)",
+    required: ["title"],
+    properties: { title: str, description: str, image: str },
+  },
   pass_click_id: { type: "boolean", description: "Append yoy_sid=<click id> to the target" },
   expires_at: { type: "string", format: "date-time" },
 };
@@ -180,7 +186,7 @@ const TOOLS: Tool[] = [
     scope: "links:write",
     title: "Update a short link",
     description:
-      "Changes a short link's target_url, title, tags, utm_defaults, pass_click_id or expires_at. A new target_url changes where an existing, possibly already shared link goes.",
+      "Changes a short link's target_url, title, tags, utm_defaults, preview, pass_click_id or expires_at. A new target_url changes where an existing, possibly already shared link goes.",
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: "object",

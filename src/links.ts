@@ -30,6 +30,7 @@ export type LinkRow = {
   title: string | null;
   tags: string[];
   utm_defaults: Record<string, string> | null;
+  preview: Preview | null;
   pass_click_id: boolean;
   expires_at: Date | null;
   ext_service: string | null;
@@ -42,6 +43,9 @@ export type LinkRow = {
   created_via: CreatedVia;
 };
 
+// The Open Graph preview link-preview bots see instead of the redirect (see app.ts).
+export type Preview = { title: string; description?: string; image?: string };
+
 export type CreatedVia = "api" | "admin" | "mcp" | "web";
 
 export type LinkInput = {
@@ -50,6 +54,7 @@ export type LinkInput = {
   title?: string;
   tags?: string[];
   utm_defaults?: Record<string, string>;
+  preview?: Preview;
   pass_click_id?: boolean;
   expires_at?: string;
   external_ref?: { service: string; entity_type: string; entity_id: string };
@@ -80,6 +85,16 @@ const FIELDS: Record<string, Check> = {
     rule: "object of utm_source, utm_medium, utm_campaign, utm_term, utm_content strings",
     nullable: true,
   },
+  preview: {
+    ok: (v) =>
+      isPlainObject(v) &&
+      Object.keys(v).every((k) => ["title", "description", "image"].includes(k)) &&
+      isString(v.title, 1, 200) &&
+      (v.description === undefined || isString(v.description, 0, 500)) &&
+      (v.image === undefined || (isString(v.image, 1, 2048) && /^https:\/\/[^\s]+$/.test(v.image) && URL.canParse(v.image))),
+    rule: "object with title (1-200), optional description (up to 500) and image (https URL)",
+    nullable: true,
+  },
   pass_click_id: { ok: (v) => typeof v === "boolean", rule: "boolean" },
   expires_at: {
     ok: (v, now) => typeof v === "string" && RFC3339.test(v) && Date.parse(v) > now.getTime(),
@@ -97,7 +112,7 @@ const FIELDS: Record<string, Check> = {
   },
 };
 
-const UPDATABLE = new Set(["target_url", "title", "tags", "utm_defaults", "pass_click_id", "expires_at"]);
+const UPDATABLE = new Set(["target_url", "title", "tags", "utm_defaults", "preview", "pass_click_id", "expires_at"]);
 
 function checkFields(body: Record<string, unknown>, allowNull: boolean, now: Date): Record<string, string> {
   const fields: Record<string, string> = {};
@@ -132,6 +147,7 @@ export function toLink(row: LinkRow, publicOrigin: string, now = new Date()) {
     title: row.title,
     tags: row.tags,
     utm_defaults: row.utm_defaults,
+    preview: row.preview,
     pass_click_id: row.pass_click_id,
     expires_at: row.expires_at,
     external_ref: row.ext_service
@@ -238,11 +254,11 @@ export async function createLink(
     const code = input.code ?? randomBase62(7);
     try {
       const [row]: LinkRow[] = await sql`
-        insert into links (id, service_id, code, target_url, title, tags, utm_defaults, pass_click_id,
+        insert into links (id, service_id, code, target_url, title, tags, utm_defaults, preview, pass_click_id,
                            expires_at, ext_service, ext_entity_type, ext_entity_id, idempotency_key, idempotency_hash,
                            created_via)
         values (${Bun.randomUUIDv7()}, ${serviceId}, ${code}, ${input.target_url}, ${input.title ?? null},
-                ${sql.array(input.tags ?? [], "text")}, ${input.utm_defaults ?? null}, ${input.pass_click_id ?? false},
+                ${sql.array(input.tags ?? [], "text")}, ${input.utm_defaults ?? null}, ${input.preview ?? null}, ${input.pass_click_id ?? false},
                 ${input.expires_at ?? null}, ${input.external_ref?.service ?? null},
                 ${input.external_ref?.entity_type ?? null}, ${input.external_ref?.entity_id ?? null},
                 ${idempotencyKey}, ${idempotencyKey ? hash : null}, ${createdVia})

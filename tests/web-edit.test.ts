@@ -92,6 +92,30 @@ describe("editing a link", () => {
     expect((await get("/annlink", "")).headers.get("location")).toBe("https://example.com/new");
   });
 
+  test("a preview is saved, shown in the form, and cleared when its fields are empty", async () => {
+    await edit({ preview_title: "Gig", preview_description: "Sat", preview_image: "https://cdn.example/p.jpg" });
+    expect((await link()).preview).toEqual({ title: "Gig", description: "Sat", image: "https://cdn.example/p.jpg" });
+    expect(await (await get(`/links/${id}`)).text()).toContain('value="https://cdn.example/p.jpg"');
+    await edit({});
+    expect((await link()).preview).toBeNull();
+  });
+
+  test.each([
+    ["a preview image without a title", { preview_image: "https://cdn.example/p.jpg" }],
+    ["an http preview image", { preview_title: "Gig", preview_image: "http://cdn.example/p.jpg" }],
+  ])("%s is refused with 422", async (_, fields) => {
+    const res = await edit(fields);
+    expect(res.status).toBe(422);
+    expect(await res.text()).toContain("preview");
+    expect((await link()).preview).toBeNull();
+  });
+
+  test("the create form's More options take a preview", async () => {
+    const res = await post("/links", { target_url: "https://example.com/p", code: "withprev", preview_title: "Hello" });
+    expect(res.status).toBe(303);
+    expect((await sql`select preview from links where code = 'withprev'`)[0].preview).toEqual({ title: "Hello" });
+  });
+
   test("empty title, tags and expiry clear them", async () => {
     await edit({ expires_at: "2027-01-31T10:00" });
     expect((await edit({})).status).toBe(303);

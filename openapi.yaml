@@ -743,6 +743,19 @@ components:
       type: [string, 'null']
       description: '`null` on the last page.'
 
+    Preview:
+      type: object
+      additionalProperties: false
+      required: [title]
+      description: |
+        Shown by Telegram, Facebook, X, LinkedIn, Slack, WhatsApp and Discord when the short link
+        is shared: their preview bots get a page with these Open Graph tags, people get the
+        redirect. Without a preview, bots follow the redirect and read the target's own tags.
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 500 }
+        image: { type: string, format: uri, maxLength: 2048, pattern: '^https://', description: Image URL, at least 1200×630 for a large card. }
+
     UtmDefaults:
       type: object
       additionalProperties: false
@@ -790,6 +803,7 @@ components:
           uniqueItems: true
           items: { $ref: '#/components/schemas/Tag' }
         utm_defaults: { $ref: '#/components/schemas/UtmDefaults' }
+        preview: { $ref: '#/components/schemas/Preview' }
         pass_click_id:
           type: boolean
           default: false
@@ -816,6 +830,10 @@ components:
           oneOf:
             - $ref: '#/components/schemas/UtmDefaults'
             - type: 'null'
+        preview:
+          oneOf:
+            - $ref: '#/components/schemas/Preview'
+            - type: 'null'
         pass_click_id: { type: boolean }
         expires_at: { type: [string, 'null'], format: date-time }
 
@@ -829,6 +847,7 @@ components:
         - title
         - tags
         - utm_defaults
+        - preview
         - pass_click_id
         - expires_at
         - external_ref
@@ -849,6 +868,10 @@ components:
         utm_defaults:
           oneOf:
             - $ref: '#/components/schemas/UtmDefaults'
+            - type: 'null'
+        preview:
+          oneOf:
+            - $ref: '#/components/schemas/Preview'
             - type: 'null'
         pass_click_id: { type: boolean }
         expires_at: { type: [string, 'null'], format: date-time }

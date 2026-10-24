@@ -27,6 +27,15 @@ type FormValues = Record<string, string>;
 
 const UTM = ["utm_source", "utm_medium", "utm_campaign"] as const;
 
+// The preview fields of a form; a preview needs at least its title. Any field without the title
+// still goes through, so validation can say what is missing.
+export function previewFrom(f: FormValues): Record<string, string> | null {
+  const p = Object.fromEntries(
+    (["title", "description", "image"] as const).filter((k) => f[`preview_${k}`]).map((k) => [k, f[`preview_${k}`]!]),
+  );
+  return Object.keys(p).length ? p : null;
+}
+
 // Turns the admin form into the same JSON body POST /v1/links accepts; blank fields are omitted.
 export function linkBody(f: FormValues): Record<string, unknown> {
   const body: Record<string, unknown> = { target_url: f.target_url ?? "" };
@@ -38,6 +47,8 @@ export function linkBody(f: FormValues): Record<string, unknown> {
   if (Object.keys(utm).length) body.utm_defaults = utm;
   if (f.expires_at) body.expires_at = `${f.expires_at}:00Z`;
   if (f.pass_click_id === "on") body.pass_click_id = true;
+  const preview = previewFrom(f);
+  if (preview) body.preview = preview;
   return body;
 }
 
