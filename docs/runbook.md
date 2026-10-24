@@ -37,12 +37,18 @@ ssh yoy-fyi-vm 'sudo docker logs --tail 50 yoy-fyi-app-1'
 | Kind | Location |
 |---|---|
 | Non-secret settings | [`deploy/prod.env`](../deploy/prod.env) and [`deploy/test.env`](../deploy/test.env), in git |
-| Secrets | `/etc/yoy-fyi/<stage>/` on the VM only: `db.env` (Postgres password), `app.env` (`DATABASE_URL`, `SESSION_SECRET`, `WEBHOOK_ENC_KEY`, `RESEND_API_KEY`), `tunnel.env` (`TUNNEL_TOKEN`). Mode `0640`, owner `root:runner`. |
+| Secrets | `/etc/yoy-fyi/<stage>/` on the VM only: `db.env` (Postgres password), `app.env` (`DATABASE_URL`, `SESSION_SECRET`, `WEBHOOK_ENC_KEY`, `RESEND_API_KEY`, optional `GOOGLE_CLIENT_SECRET` and `SAFE_BROWSING_API_KEY`), `tunnel.env` (`TUNNEL_TOKEN`). Mode `0640`, owner `root:runner`. |
 
 To change a secret without it appearing in the terminal or shell history:
 
 ```bash
 ssh -t yoy-fyi-vm 'read -rsp "value: " V; echo; sudo sed -i "s|^RESEND_API_KEY=.*|RESEND_API_KEY=$V|" /etc/yoy-fyi/prod/app.env'
+```
+
+A key that is not in the file yet (for example `SAFE_BROWSING_API_KEY`: a Google API key restricted to the Safe Browsing API in the yoy-fyi Google Cloud project) is appended instead:
+
+```bash
+ssh -t yoy-fyi-vm 'read -rsp "value: " V; echo; echo "SAFE_BROWSING_API_KEY=$V" | sudo tee -a /etc/yoy-fyi/prod/app.env >/dev/null'
 ```
 
 Containers read these files only when they are created, so the change takes effect on the next deploy. A plain `docker restart` keeps the old values. Do not rotate `WEBHOOK_ENC_KEY` in place: it decrypts the stored webhook secrets.

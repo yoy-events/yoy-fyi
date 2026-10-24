@@ -11,6 +11,7 @@ import { linkRoutes } from "./links";
 import { mcpRoutes } from "./mcp";
 import { webRoutes } from "./web";
 import { type FetchClientMetadata, fetchClientMetadata, oauthRoutes } from "./oauth";
+import type { UnsafeUrls } from "./safe-browsing";
 import { createSaltSource, visitorHash } from "./salt";
 import { buildTarget } from "./target";
 import { webhookRoutes } from "./webhooks";
@@ -23,6 +24,8 @@ export type AppDeps = {
   now?: () => Date;
   redirectLimit?: RateLimit;
   resolveHost?: (host: string) => Promise<string[]>;
+  // Google Safe Browsing check for link targets; without it targets are not checked.
+  unsafeUrls?: UnsafeUrls;
   createLimit?: RateLimit;
   webhookKey?: CryptoKey;
   admin?: AdminConfig;
@@ -52,6 +55,7 @@ export function createApp({
   sql,
   publicOrigin,
   resolveHost,
+  unsafeUrls,
   createLimit,
   webhookKey,
   admin,
@@ -116,18 +120,18 @@ export function createApp({
   v1.route("/", keyRoutes(sql));
   v1.route("/", analyticsRoutes(sql));
   v1.route("/", webhookRoutes({ sql, publicOrigin, webhookKey, resolveHost }));
-  v1.route("/", linkRoutes({ sql, publicOrigin, resolveHost, createLimit }));
+  v1.route("/", linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createLimit }));
   app.route("/v1", v1);
 
   app.post("/mcp", mcpRoutes({ sql, publicOrigin, v1, now, limit: mcpLimit }));
   if (admin) {
-    app.route("/", webRoutes({ sql, publicOrigin, admin, now, resolveHost }));
+    app.route("/", webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUrls }));
     const ownHost = new URL(publicOrigin).hostname;
     const metadata = clientMetadata ?? fetchClientMetadata({ ownHost, resolveHost });
     app.route("/", oauthRoutes({ sql, publicOrigin, admin, now, clientMetadata: metadata }));
   }
   app.on(["GET", "DELETE"], "/mcp", (c) => c.json({ error: { code: "method_not_allowed", message: "POST only." } }, 405));
-  if (admin) app.route("/admin", adminRoutes({ sql, publicOrigin, admin, now, resolveHost }));
+  if (admin) app.route("/admin", adminRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUrls }));
 
   app.get("/:code", async (c) => {
     const code = c.req.param("code");

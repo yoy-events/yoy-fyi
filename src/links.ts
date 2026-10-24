@@ -13,6 +13,7 @@ import {
 } from "./http";
 import { randomBase62 } from "./keys";
 import { type RateLimit, createRateLimiter } from "./ratelimit";
+import type { UnsafeUrls } from "./safe-browsing";
 import { checkTarget } from "./target-policy";
 
 // System paths that can never be link codes, compared case-insensitively.
@@ -189,7 +190,7 @@ async function findExisting(sql: SQL, serviceId: string, key: string | null, has
 // reserved codes, the target policy and code generation. Shared by /v1 and the admin UI.
 export async function createLink(
   sql: SQL,
-  { ownHost, resolveHost }: { ownHost: string; resolveHost?: (host: string) => Promise<string[]> },
+  { ownHost, resolveHost, unsafeUrls }: { ownHost: string; resolveHost?: (host: string) => Promise<string[]>; unsafeUrls?: UnsafeUrls },
   serviceId: string,
   body: Record<string, unknown>,
   idempotencyKey: string | null = null,
@@ -221,7 +222,7 @@ export async function createLink(
   if (input.code && RESERVED.has(input.code.toLowerCase())) {
     return { kind: "error", status: 422, code: "code_reserved", message: `"${input.code}" is a reserved path.` };
   }
-  const rejection = await checkTarget(input.target_url, { ownHost, resolve: resolveHost });
+  const rejection = await checkTarget(input.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
   if (rejection) {
     return {
       kind: "error",
@@ -264,6 +265,7 @@ type Deps = {
   sql: SQL;
   publicOrigin: string;
   resolveHost?: (host: string) => Promise<string[]>;
+  unsafeUrls?: UnsafeUrls;
   createLimit?: RateLimit;
 };
 
@@ -271,7 +273,7 @@ type Deps = {
 // which a client request cannot set.
 type LinkEnv = AuthEnv & { Bindings: { createdVia?: CreatedVia } };
 
-export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { perMinute: 60, burst: 20 } }: Deps) {
+export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createLimit = { perMinute: 60, burst: 20 } }: Deps) {
   const app = new Hono<LinkEnv>();
   const ownHost = new URL(publicOrigin).hostname;
   const limitCreate = createRateLimiter(createLimit);
@@ -293,7 +295,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
     }
     const body = await readJsonObject(c);
     if (!body) return apiError(c, 400, "invalid_request", "Body must be a JSON object.");
-    const result = await createLink(sql, { ownHost, resolveHost }, caller.serviceId, body, idempotencyKey, c.env?.createdVia);
+    const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, caller.serviceId, body, idempotencyKey, c.env?.createdVia);
     if (result.kind === "error") return apiError(c, result.status, result.code, result.message, result.details);
     if (result.kind === "created") c.header("Location", `/v1/links/${result.row.id}`);
     return c.json(toLink(result.row, publicOrigin), result.kind === "created" ? 201 : 200);
@@ -352,7 +354,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
     if (!link) return apiError(c, 404, "not_found", "Link not found.");
     if (link.disabled_at) return apiError(c, 409, "link_disabled", "A disabled link cannot be changed.");
     if (typeof body.target_url === "string") {
-      const rejection = await checkTarget(body.target_url, { ownHost, resolve: resolveHost });
+      const rejection = await checkTarget(body.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
       if (rejection) return apiError(c, 422, "target_rejected", "The target URL is not allowed.", { reason: rejection });
     }
 
