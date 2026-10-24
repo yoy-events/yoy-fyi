@@ -271,6 +271,25 @@ describe("account API keys", () => {
   test("needs a session", async () => {
     expect((await get("/account/keys")).headers.get("location")).toBe("/");
   });
+
+  test("allows at most 10 active keys", async () => {
+    const { cookie } = await signIn();
+    const statuses = [];
+    for (let i = 0; i < 11; i++) statuses.push((await post("/account/keys", { name: `k${i}`, scope: ["links:read"] }, cookie)).status);
+    expect(statuses.slice(0, 10).every((s) => s === 201)).toBe(true);
+    expect(statuses[10]).toBe(422);
+  });
+
+  test("a blocked user's keys stop working on /v1 and /mcp", async () => {
+    const { cookie } = await signIn();
+    const secret = /yfi_[A-Za-z0-9]{8}_[A-Za-z0-9]{32}/.exec(await (await post("/account/keys", { name: "k", scope: ["links:read"] }, cookie)).text())![0];
+    await sql`update users set disabled_at = now()`;
+    const auth = { authorization: `Bearer ${secret}` };
+
+    expect((await app.request(`${ORIGIN}/v1/me`, { headers: auth })).status).toBe(401);
+    const mcp = await app.request(`${ORIGIN}/mcp`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: '{"jsonrpc":"2.0","id":1,"method":"ping"}' });
+    expect(mcp.status).toBe(401);
+  });
 });
 
 describe("public pages", () => {

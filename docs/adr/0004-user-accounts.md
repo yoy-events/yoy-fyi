@@ -26,7 +26,7 @@ The first version of yoy.fyi had a home page where a signed-in person saw "My Li
 ### Pages (outside `/admin`)
 
 - **`/`:** signed out, it describes yoy.fyi and offers Sign in with Google. Signed in, it shows the creation form, then the user's links with their clicks over the last 7 days. With no links yet, it says so and offers to create the first one.
-- **`/links/{id}`:** the short URL with a copy button, QR codes (SVG and PNG), daily clicks and top sources, editing of the title, and a disable button.
+- **`/links/{id}`:** the short URL, QR codes (SVG and PNG downloads), 30 days of daily clicks, top referrers, countries and devices, and a disable button. The pages run no JavaScript, so there is no copy button: the URL is plain text to select.
 - **`/account/keys`:** API keys for the user's own service. Users can grant `links:read`, `links:write`, `analytics:read` and `webhooks:manage`, never `keys:manage`. A secret is shown once.
 - **`/privacy` and `/terms`:** required by Google to publish the consent screen.
 - **New reserved codes:** `links`, `account`, `login`, `logout`, `privacy` and `terms`.
@@ -34,8 +34,8 @@ The first version of yoy.fyi had a home page where a signed-in person saw "My Li
 ### Abuse
 
 - **Target policy:** every target goes through the existing policy (http(s) only, no credentials, no private addresses, not yoy.fyi itself).
-- **Rate limits:** per user, 20 creates per hour from the web form, on top of the 60 per minute per API key.
-- **Blocking:** the admin can block a user. A blocked user can't sign in, their keys stop working, and their links answer 410.
+- **Rate limits:** per user, 20 creates per hour from the web form. The `/v1` limit of 60 per minute now counts per service instead of per key, and a personal account holds at most 10 active keys, so minting keys cannot multiply the limit.
+- **Blocking:** the admin can block a user. A blocked user can't sign in, their keys stop working (key checks require the owning user not to be blocked), and their links answer 410.
 
 ## Consequences
 

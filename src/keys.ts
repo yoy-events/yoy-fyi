@@ -74,7 +74,8 @@ export async function authenticate(sql: SQL, header: string | undefined): Promis
   const [row] = await sql`
     select k.id, k.service_id, k.scopes, k.secret_hash
     from api_keys k join services s on s.id = k.service_id
-    where k.prefix = ${prefix} and k.revoked_at is null and s.disabled_at is null`;
+    left join users u on u.id = s.owner_user_id
+    where k.prefix = ${prefix} and k.revoked_at is null and s.disabled_at is null and u.disabled_at is null`;
   if (!row) return null;
   const expected = Buffer.from(row.secret_hash, "hex");
   const actual = Buffer.from(sha256(secret!), "hex");

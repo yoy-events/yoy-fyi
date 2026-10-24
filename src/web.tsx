@@ -16,6 +16,7 @@ import { createRateLimiter } from "./ratelimit";
 import { type User, clearUserSession, currentUser } from "./users";
 
 const DAY = 86_400_000;
+const MAX_KEYS = 10;
 // What a person may grant their own keys. Keys are managed here, never through keys:manage.
 const USER_SCOPES = ["links:read", "links:write", "analytics:read", "webhooks:manage"] as const satisfies readonly Scope[];
 const SCOPE_TEXT: Record<string, string> = {
@@ -345,6 +346,8 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost }: Deps) 
     if (scopes.length === 0 || !scopes.every((s) => (USER_SCOPES as readonly string[]).includes(s)) || new Set(scopes).size !== scopes.length) {
       errors.push("Choose at least one of the listed permissions.");
     }
+    const [{ active }] = await sql`select count(*)::int as active from api_keys where service_id = ${u.serviceId} and revoked_at is null`;
+    if (active >= MAX_KEYS) errors.push(`You can have at most ${MAX_KEYS} active keys. Revoke one first.`);
     if (errors.length) return keysPage(c, u, { errors }, 422);
     const [service] = await sql`select slug from services where id = ${u.serviceId}`;
     const { token } = await issueKey(sql, { serviceSlug: service.slug, name, scopes: scopes as Scope[] });

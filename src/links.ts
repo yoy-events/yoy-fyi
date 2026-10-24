@@ -278,12 +278,13 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, createLimit = { per
 
   app.post("/links", requireScope("links:write"), async (c) => {
     const caller = c.get("caller");
-    const limit = limitCreate(caller.keyId);
+    // Per service, so creating more keys does not raise the limit.
+    const limit = limitCreate(caller.serviceId);
     c.header("RateLimit-Limit", String(limitCreate.burst));
     c.header("RateLimit-Remaining", String(limit.remaining));
     if (!limit.ok) {
       c.header("Retry-After", String(limit.retryAfterSeconds));
-      return apiError(c, 429, "rate_limited", "Too many link creates for this key.");
+      return apiError(c, 429, "rate_limited", "Too many link creates for this service.");
     }
 
     const idempotencyKey = c.req.header("idempotency-key") ?? null;
