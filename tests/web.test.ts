@@ -143,7 +143,7 @@ describe("home page", () => {
   test("with no links: an empty state and the create form", async () => {
     const { cookie } = await signIn();
     const html = await (await get("/", cookie)).text();
-    expect(html).toContain("Create your first short link");
+    expect(html).toContain("Створіть перше коротке посилання");
     expect(html).toContain('action="/links"');
   });
 
@@ -213,7 +213,7 @@ describe("create form", () => {
     const [visible, hidden] = html.split("<details");
 
     expect(visible).toContain('name="target_url"');
-    expect(hidden).toContain("More options");
+    expect(hidden).toContain("Більше параметрів");
     for (const name of ["title", "code", "tags", "utm_source", "utm_medium", "utm_campaign"]) {
       expect(visible).not.toContain(`name="${name}"`);
       expect(hidden).toContain(`name="${name}"`);
@@ -369,4 +369,9 @@ describe("public pages", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("yoy.fyi");
   });
+});
+
+test("without a Telegram bot, the header has no Telegram link", async () => {
+  const { cookie } = await signIn();
+  expect(await (await get("/", cookie)).text()).not.toContain('href="/account/telegram"');
 });

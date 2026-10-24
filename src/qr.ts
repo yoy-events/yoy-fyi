@@ -22,12 +22,12 @@ export function qrOptions(query: URLSearchParams): QrStyle | { error: string } {
   const fg = (query.get("fg") || "#000000").toLowerCase();
   const bg = (query.get("bg") || "#ffffff").toLowerCase();
   const caption = (query.get("caption") ?? "").trim() || null;
-  if (!HEX.test(fg)) return { error: "fg must be a colour like #1a2b3c" };
-  if (!HEX.test(bg)) return { error: "bg must be a colour like #ffffff" };
+  if (!HEX.test(fg)) return { error: "Колір коду (fg) має бути на кшталт #1a2b3c" };
+  if (!HEX.test(bg)) return { error: "Колір фону (bg) має бути на кшталт #ffffff" };
   if (luminance(fg) >= luminance(bg) || (luminance(bg) + 0.05) / (luminance(fg) + 0.05) < 3) {
-    return { error: "Not enough contrast: use a dark code on a light background" };
+    return { error: "Замалий контраст (contrast): потрібен темний код на світлому фоні" };
   }
-  if (caption && caption.length > MAX_CAPTION) return { error: `The caption is at most ${MAX_CAPTION} characters` };
+  if (caption && caption.length > MAX_CAPTION) return { error: `Підпис (caption) — не більше ${MAX_CAPTION} символів` };
   return { fg, bg, caption };
 }
 

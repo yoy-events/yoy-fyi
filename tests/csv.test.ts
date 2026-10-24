@@ -16,7 +16,7 @@ describe("parseCsv", () => {
   });
 
   test("an unclosed quote is an error", () => {
-    expect(parseCsv('a\n"open')).toEqual({ error: "Unclosed quote in the CSV." });
+    expect(parseCsv('a\n"open')).toEqual({ error: "У CSV не закрита лапка." });
   });
 });
 
