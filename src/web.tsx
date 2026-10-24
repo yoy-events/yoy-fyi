@@ -2,6 +2,7 @@
 // links, download QR codes, and create API keys for your own service.
 import type { SQL } from "bun";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { csrf } from "hono/csrf";
 import type { Child } from "hono/jsx";
 import { type AdminConfig, startGoogle } from "./admin/auth";
@@ -11,6 +12,7 @@ import { timeseries, breakdown } from "./analytics";
 import { isUuid } from "./http";
 import { type Scope, issueKey } from "./keys";
 import { type LinkRow, createLink, toLink, updateLink } from "./links";
+import { parseCsv, toCsv } from "./csv";
 import { type QrStyle, qrOptions, qrPng, qrSvg } from "./qr";
 import { createRateLimiter } from "./ratelimit";
 import type { UnsafeUrls } from "./safe-browsing";
@@ -221,6 +223,15 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           </p>
         )}
         <CreateForm values={form?.values} errors={form?.errors} />
+        <p class="meta">
+          <a href="/links/import">Import from CSV</a>
+          {links.length > 0 && (
+            <>
+              {" "}
+              · <a href="/links/export.csv">Export as CSV</a>
+            </>
+          )}
+        </p>
         {(links.length > 0 || filtered) && (
           <form method="get" action="/" class="row">
             <input type="search" name="q" value={q} placeholder="Search links" aria-label="Search links" />
@@ -307,6 +318,129 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
       ? Object.entries(fields).map(([k, v]) => `${k}: ${v}`)
       : [result.details?.reason ? `${result.message} (${result.details.reason})` : result.message];
     return home(c, u, { values, errors }, 422);
+  });
+
+  // CSV import: up to MAX_IMPORT rows per file, each created like a link from the form.
+  const IMPORT_COLUMNS = ["target_url", "title", "code", "tags"];
+  const MAX_IMPORT = 100;
+  const limitImport = createRateLimiter({ perMinute: 5 / 60, burst: 5 });
+
+  type ImportResult = { line: number; short_url?: string; error?: string };
+  const importPage = (c: Context, u: User, opts: { error?: string; results?: ImportResult[] } = {}, status: 200 | 422 | 429 = 200) =>
+    c.html(
+      <Page title="Import links" user={u}>
+        <h1>Import links from CSV</h1>
+        <p>
+          The first line names the columns: <code>target_url</code> (required), <code>title</code>, <code>code</code> and{" "}
+          <code>tags</code> (comma-separated, in quotes). Up to {MAX_IMPORT} links per file.
+        </p>
+        {opts.error && <p class="notice">{opts.error}</p>}
+        {opts.results && (
+          <ul class="list">
+            {opts.results.map((r) => (
+              <li>
+                Line {r.line}:{" "}
+                {r.short_url ? (
+                  <>
+                    <input value={r.short_url} readonly aria-label={`Short link from line ${r.line}`} />{" "}
+                    <button type="button" data-copy={r.short_url}>
+                      Copy
+                    </button>
+                  </>
+                ) : (
+                  <span class="meta">{r.error}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <form method="post" action="/links/import" enctype="multipart/form-data" class="stack card">
+          <label>
+            CSV file
+            <input type="file" name="file" accept=".csv,text/csv" />
+          </label>
+          <label>
+            or paste it here
+            <textarea name="csv" rows={8} placeholder={"target_url,title,tags\nhttps://example.com/,Example,\"a, b\""}></textarea>
+          </label>
+          <button type="submit">Import</button>
+        </form>
+        <p>
+          <a href="/links/export.csv">Download all your links as CSV</a>
+        </p>
+      </Page>,
+      status,
+    );
+
+  app.get("/links/import", (c) => importPage(c, c.get("user")));
+
+  // The body limit and the rate limit both apply before the CSV is read or parsed.
+  app.post("/links/import", bodyLimit({ maxSize: 256 * 1024, onError: (c) => c.text("The CSV is larger than 256 KB.", 413) }), async (c) => {
+    const u = c.get("user");
+    if (!limitImport(u.id).ok) return importPage(c, u, { error: "Too many imports. Try again in an hour." }, 429);
+    const form = await c.req.parseBody();
+    const text = form.file instanceof File && form.file.size > 0 ? await form.file.text() : String(form.csv ?? "");
+    const parsed = parseCsv(text);
+    if ("error" in parsed) return importPage(c, u, { error: parsed.error }, 422);
+    if (parsed.length === 0) return importPage(c, u, { error: "The CSV is empty." }, 422);
+    const [header, ...rows] = parsed as [string[], ...string[][]];
+    const columns = header.map((h) => h.trim().toLowerCase());
+    const unknown = columns.filter((h) => !IMPORT_COLUMNS.includes(h));
+    if (!columns.includes("target_url")) return importPage(c, u, { error: "The first line must name a target_url column." }, 422);
+    if (unknown.length) return importPage(c, u, { error: `Unknown columns: ${unknown.join(", ")}.` }, 422);
+    if (rows.length === 0) return importPage(c, u, { error: "The CSV has no rows after its header." }, 422);
+    if (rows.length > MAX_IMPORT) return importPage(c, u, { error: `At most ${MAX_IMPORT} links per import.` }, 422);
+
+    const results: ImportResult[] = [];
+    for (const [i, row] of rows.entries()) {
+      const values = Object.fromEntries(columns.map((k, j) => [k, (row[j] ?? "").trim()]));
+      const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, u.serviceId, linkBody(values), null, "web");
+      results.push(
+        result.kind === "error" ? { line: i + 2, error: errorList(result).join("; ") } : { line: i + 2, short_url: `${publicOrigin}/${result.row.code}` },
+      );
+    }
+    return importPage(c, u, { results });
+  });
+
+  const csvFile = (c: Context, name: string, rows: unknown[][]) =>
+    c.body(toCsv(rows), 200, { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${name}"` });
+
+  app.get("/links/export.csv", async (c) => {
+    const u = c.get("user");
+    const rows: (LinkRow & { clicks_total: number })[] = await sql`
+      select l.*, coalesce((select sum(d.clicks) from link_stats_daily d where d.link_id = l.id and not d.is_bot), 0)::int as clicks_total
+      from links l where l.service_id = ${u.serviceId} order by l.id`;
+    return csvFile(c, "yoy-fyi-links.csv", [
+      ["code", "short_url", "target_url", "title", "tags", "status", "clicks_total", "created_at"],
+      ...rows.map((r) => {
+        const l = toLink(r, publicOrigin, now());
+        return [l.code, l.short_url, l.target_url, l.title, l.tags.join(", "), l.status, r.clicks_total, r.created_at.toISOString()];
+      }),
+    ]);
+  });
+
+  app.get("/links/:id/clicks.csv", async (c) => {
+    const u = c.get("user");
+    const row = await ownLink(u, c.req.param("id"));
+    if (!row) return c.notFound();
+    const clicks = await sql`
+      select clicked_at, referer_host, country, ua_device, ua_browser, ua_os, utm_source, utm_medium, utm_campaign, is_bot
+      from clicks where link_id = ${row.id} order by clicked_at desc limit 10000`;
+    return csvFile(c, `${row.code}-clicks.csv`, [
+      ["clicked_at", "referer_host", "country", "device", "browser", "os", "utm_source", "utm_medium", "utm_campaign", "is_bot"],
+      ...clicks.map((k: Record<string, unknown>) => [
+        (k.clicked_at as Date).toISOString(),
+        k.referer_host,
+        k.country,
+        k.ua_device,
+        k.ua_browser,
+        k.ua_os,
+        k.utm_source,
+        k.utm_medium,
+        k.utm_campaign,
+        k.is_bot,
+      ]),
+    ]);
   });
 
   // Form fields of the edit form; empty title, tags and expiry clear them.
@@ -419,6 +553,9 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           {daily.totals.clicks} clicks in 30 days <span class="meta">({daily.totals.uniques_upper_bound} visitors at most)</span>
         </h2>
         <BarChart points={daily.points} label={(t) => t.toISOString().slice(0, 10)} />
+        <p class="meta">
+          <a href={`/links/${link.id}/clicks.csv`}>Download clicks as CSV</a>
+        </p>
         <div class="rankings">
           <Ranking title="Referrers" items={referrers!.items} total={referrers!.total_clicks} />
           <Ranking title="Countries" items={countries!.items} total={countries!.total_clicks} />
