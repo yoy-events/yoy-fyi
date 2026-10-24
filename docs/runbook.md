@@ -37,7 +37,7 @@ ssh yoy-fyi-vm 'sudo docker logs --tail 50 yoy-fyi-app-1'
 | Kind | Location |
 |---|---|
 | Non-secret settings | [`deploy/prod.env`](../deploy/prod.env) and [`deploy/test.env`](../deploy/test.env), in git |
-| Secrets | `/etc/yoy-fyi/<stage>/` on the VM only: `db.env` (Postgres password), `app.env` (`DATABASE_URL`, `SESSION_SECRET`, `WEBHOOK_ENC_KEY`, `RESEND_API_KEY`, optional `GOOGLE_CLIENT_SECRET` and `SAFE_BROWSING_API_KEY`), `tunnel.env` (`TUNNEL_TOKEN`). Mode `0640`, owner `root:runner`. |
+| Secrets | `/etc/yoy-fyi/<stage>/` on the VM only: `db.env` (Postgres password), `app.env` (`DATABASE_URL`, `SESSION_SECRET`, `WEBHOOK_ENC_KEY`, `RESEND_API_KEY`, optional `GOOGLE_CLIENT_SECRET`, `SAFE_BROWSING_API_KEY` and, on prod only, `TELEGRAM_BOT_TOKEN`), `tunnel.env` (`TUNNEL_TOKEN`). Mode `0640`, owner `root:runner`. |
 
 To change a secret without it appearing in the terminal or shell history:
 
