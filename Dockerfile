@@ -16,6 +16,7 @@ ENV NODE_ENV=production PORT=3000
 COPY --from=deps /app/node_modules node_modules
 COPY --from=geoip /app/data data
 COPY package.json tsconfig.json ./
+COPY openapi.yaml ./
 COPY migrations migrations
 COPY src src
 USER bun
