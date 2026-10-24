@@ -27,6 +27,7 @@ describe("toCsv", () => {
 
   test("neutralises cells a spreadsheet would run as a formula", () => {
     expect(toCsv([["=1+1", "+x", "-y", "@z", "ok"]])).toBe("'=1+1,'+x,'-y,'@z,ok\r\n");
+    expect(toCsv([[" =1", "\tx", "|cmd"]])).toBe("' =1,'\tx,'|cmd\r\n");
   });
 
   test("null and numbers", () => {

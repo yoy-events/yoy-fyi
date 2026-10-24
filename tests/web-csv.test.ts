@@ -105,6 +105,11 @@ describe("import", () => {
     expect(await links()).toHaveLength(0);
   });
 
+  test("a body over 256 KB is refused before it is read", async () => {
+    expect((await importCsv(`target_url\n${"x".repeat(300 * 1024)}`)).status).toBe(413);
+    expect(await links()).toHaveLength(0);
+  });
+
   test("at most 5 imports an hour", async () => {
     for (let i = 0; i < 5; i++) expect((await importCsv(`target_url\nhttps://example.com/${i}\n`)).status).toBe(200);
     expect((await importCsv("target_url\nhttps://example.com/x\n")).status).toBe(429);

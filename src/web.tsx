@@ -2,6 +2,7 @@
 // links, download QR codes, and create API keys for your own service.
 import type { SQL } from "bun";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { csrf } from "hono/csrf";
 import type { Child } from "hono/jsx";
 import { type AdminConfig, startGoogle } from "./admin/auth";
@@ -373,8 +374,10 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
 
   app.get("/links/import", (c) => importPage(c, c.get("user")));
 
-  app.post("/links/import", async (c) => {
+  // The body limit and the rate limit both apply before the CSV is read or parsed.
+  app.post("/links/import", bodyLimit({ maxSize: 256 * 1024, onError: (c) => c.text("The CSV is larger than 256 KB.", 413) }), async (c) => {
     const u = c.get("user");
+    if (!limitImport(u.id).ok) return importPage(c, u, { error: "Too many imports. Try again in an hour." }, 429);
     const form = await c.req.parseBody();
     const text = form.file instanceof File && form.file.size > 0 ? await form.file.text() : String(form.csv ?? "");
     const parsed = parseCsv(text);
@@ -387,7 +390,6 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     if (unknown.length) return importPage(c, u, { error: `Unknown columns: ${unknown.join(", ")}.` }, 422);
     if (rows.length === 0) return importPage(c, u, { error: "The CSV has no rows after its header." }, 422);
     if (rows.length > MAX_IMPORT) return importPage(c, u, { error: `At most ${MAX_IMPORT} links per import.` }, 422);
-    if (!limitImport(u.id).ok) return importPage(c, u, { error: "Too many imports. Try again in an hour." }, 429);
 
     const results: ImportResult[] = [];
     for (const [i, row] of rows.entries()) {

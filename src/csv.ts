@@ -35,10 +35,11 @@ export function parseCsv(text: string): string[][] | { error: string } {
   return rows;
 }
 
-// A cell starting with = + - or @ is prefixed with ' so spreadsheets show it instead of running it.
+// A cell a spreadsheet could run as a formula (= + - @, also after leading whitespace, or one
+// starting with a tab, CR or |) is prefixed with ' so it is shown instead.
 const cellText = (v: unknown) => {
   const s = v === null || v === undefined ? "" : String(v);
-  const safe = /^[=+\-@]/.test(s) ? `'${s}` : s;
+  const safe = /^(\s*[=+\-@]|[\t\r|])/.test(s) ? `'${s}` : s;
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 
