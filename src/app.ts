@@ -128,10 +128,11 @@ export function createApp({
     const code = c.req.param("code");
     if (!CODE.test(code)) return c.html(page("Not found", "This short link does not exist."), 404);
 
+    // A blocked owner's service takes its links down too (ADR-0004).
     const [link]: LinkRow[] = await sql`
-      select id, service_id, target_url, utm_defaults, pass_click_id,
-             (disabled_at is not null or expires_at <= now()) as gone
-      from links where code = ${code}`;
+      select l.id, l.service_id, l.target_url, l.utm_defaults, l.pass_click_id,
+             (l.disabled_at is not null or l.expires_at <= now() or s.disabled_at is not null) as gone
+      from links l join services s on s.id = l.service_id where l.code = ${code}`;
     if (!link) return c.html(page("Not found", "This short link does not exist."), 404);
     if (link.gone) return c.html(page("Link no longer available", "This short link was disabled or has expired."), 410);
 
