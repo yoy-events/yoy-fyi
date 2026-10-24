@@ -50,6 +50,7 @@ test("creates an API key and shows it once", async () => {
 test("creates a link from the service page and shows its analytics page", async () => {
   await page.goto("/admin/services/e2e");
   await page.getByLabel("Target URL").fill("https://example.com/e2e-landing");
+  await page.getByText("More options").click();
   await page.getByLabel("Custom code (optional)").fill("e2e-link");
   await page.getByLabel("utm_source").fill("e2e");
   await page.getByRole("button", { name: "Create link" }).click();

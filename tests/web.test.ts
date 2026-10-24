@@ -158,6 +158,29 @@ describe("home page", () => {
   });
 });
 
+describe("create form", () => {
+  test("shows only the long URL; everything else waits under More options", async () => {
+    const { cookie } = await signIn();
+    const html = await (await get("/", cookie)).text();
+    const [visible, hidden] = html.split("<details");
+
+    expect(visible).toContain('name="target_url"');
+    expect(hidden).toContain("More options");
+    for (const name of ["title", "code", "tags", "utm_source", "utm_medium", "utm_campaign"]) {
+      expect(visible).not.toContain(`name="${name}"`);
+      expect(hidden).toContain(`name="${name}"`);
+    }
+    expect(html).not.toMatch(/<details[^>]*open/);
+  });
+
+  test("after an error in an optional field, More options stays open with the values", async () => {
+    const { cookie } = await signIn();
+    const html = await (await post("/links", { target_url: "https://example.com/", code: "no spaces" }, cookie)).text();
+    expect(html).toMatch(/<details[^>]*open/);
+    expect(html).toContain('value="no spaces"');
+  });
+});
+
 describe("POST /links", () => {
   test("valid: creates a link in the user's service, marked web, and opens it", async () => {
     const { cookie } = await signIn();

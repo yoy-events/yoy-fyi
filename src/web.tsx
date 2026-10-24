@@ -67,10 +67,13 @@ function Page({ title, user, children }: { title: string; user?: User | null; ch
   );
 }
 
+const OPTIONAL = ["title", "code", "tags", "utm_source", "utm_medium", "utm_campaign"] as const;
+
+// One field to start with, like Bitly and Dub; the rest waits under More options (no JavaScript).
 function CreateForm({ values = {}, errors = [] }: { values?: Record<string, string>; errors?: string[] }) {
+  const open = OPTIONAL.some((k) => values[k]);
   return (
     <form method="post" action="/links" class="stack card">
-      <h2>New short link</h2>
       {errors.length > 0 && (
         <ul class="errors">
           {errors.map((e) => (
@@ -79,28 +82,33 @@ function CreateForm({ values = {}, errors = [] }: { values?: Record<string, stri
         </ul>
       )}
       <label>
-        Long URL
+        Paste a long link
         <input type="url" name="target_url" required value={values.target_url ?? ""} placeholder="https://" />
       </label>
-      <label>
-        Title <span class="meta">(optional)</span>
-        <input name="title" value={values.title ?? ""} maxlength={200} />
-      </label>
-      <label>
-        Custom code <span class="meta">(optional, yoy.fyi/your-code)</span>
-        <input name="code" value={values.code ?? ""} />
-      </label>
-      <label>
-        Tags <span class="meta">(comma-separated)</span>
-        <input name="tags" value={values.tags ?? ""} />
-      </label>
-      {(["utm_source", "utm_medium", "utm_campaign"] as const).map((k) => (
-        <label>
-          {k} <span class="meta">(optional)</span>
-          <input name={k} value={values[k] ?? ""} />
-        </label>
-      ))}
-      <button type="submit">Create short link</button>
+      <details open={open}>
+        <summary>More options</summary>
+        <div class="stack">
+          <label>
+            Title
+            <input name="title" value={values.title ?? ""} maxlength={200} />
+          </label>
+          <label>
+            Custom code <span class="meta">yoy.fyi/your-code</span>
+            <input name="code" value={values.code ?? ""} />
+          </label>
+          <label>
+            Tags <span class="meta">comma-separated</span>
+            <input name="tags" value={values.tags ?? ""} />
+          </label>
+          {(["utm_source", "utm_medium", "utm_campaign"] as const).map((k) => (
+            <label>
+              {k}
+              <input name={k} value={values[k] ?? ""} />
+            </label>
+          ))}
+        </div>
+      </details>
+      <button type="submit">Shorten</button>
     </form>
   );
 }
