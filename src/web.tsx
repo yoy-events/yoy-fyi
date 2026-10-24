@@ -148,10 +148,21 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     // The link just created, shown on top with its QR, like Dub and Bitly.
     const createdRow = await ownLink(u, c.req.query("created") ?? "");
     const created = createdRow ? toLink(createdRow, publicOrigin, now()) : null;
+    // Search matches code, title and target as plain text; LIKE wildcards in it are escaped.
+    const q = (c.req.query("q") ?? "").trim().slice(0, 200);
+    const tag = (c.req.query("tag") ?? "").trim().slice(0, 50);
+    const pattern = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
     const links: (LinkRow & { clicks_7d: number })[] = await sql`
       select l.*, coalesce((select sum(d.clicks) from link_stats_daily d
                             where d.link_id = l.id and not d.is_bot and d.bucket >= ${new Date(now().getTime() - 7 * DAY)}), 0)::int as clicks_7d
-      from links l where l.service_id = ${u.serviceId} order by l.id desc limit 200`;
+      from links l
+      where l.service_id = ${u.serviceId}
+        and (${q} = '' or l.code ilike ${pattern} or l.title ilike ${pattern} or l.target_url ilike ${pattern})
+        and (${tag} = '' or ${tag} = any(l.tags))
+      order by l.id desc limit 200`;
+    const tags: { tag: string }[] = await sql`
+      select distinct unnest(tags) as tag from links where service_id = ${u.serviceId} order by tag limit 50`;
+    const filtered = q !== "" || tag !== "";
     return c.html(
       <Page title="My links" user={u}>
         <h1>My links</h1>
@@ -172,13 +183,36 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
             </p>
           </section>
         )}
-        {links.length === 0 && !created && (
+        {links.length === 0 && !created && !filtered && (
           <p class="notice">
             Create your first short link: paste a long URL below and get a short yoy.fyi link with a QR code and click
             stats.
           </p>
         )}
         <CreateForm values={form?.values} errors={form?.errors} />
+        {(links.length > 0 || filtered) && (
+          <form method="get" action="/" class="row">
+            <input type="search" name="q" value={q} placeholder="Search links" aria-label="Search links" />
+            {tag && <input type="hidden" name="tag" value={tag} />}
+            <button type="submit" class="secondary">
+              Search
+            </button>
+          </form>
+        )}
+        {tags.length > 0 && (
+          <p class="meta">
+            Tags:{" "}
+            {tags.map((t) => (
+              <>
+                <a href={`/?tag=${encodeURIComponent(t.tag)}`} class={t.tag === tag ? "badge active" : "badge"}>
+                  {t.tag}
+                </a>{" "}
+              </>
+            ))}
+            {filtered && <a href="/">Show all</a>}
+          </p>
+        )}
+        {filtered && links.length === 0 && <p class="notice">No links match.</p>}
         {links.length > 0 && (
           <ul class="list">
             {links.map((row) => {
