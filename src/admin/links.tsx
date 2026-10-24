@@ -224,7 +224,8 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls }: Deps)
             <Ranking title={DIMENSION_TITLES[r.dimension]} items={r.items} total={r.total_clicks} />
           ))}
         </div>
-        {link.status !== "disabled" && (
+        {/* An owner's own disable can be turned into an admin takedown, which the owner cannot undo. */}
+        {(link.status !== "disabled" || row.disabled_by === "owner") && (
           <form method="post" action={`/admin/links/${link.id}/disable`}>
             <button type="submit" class="danger">
               Disable link
@@ -248,7 +249,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls }: Deps)
     const [row] = /^[0-9a-f-]{36}$/i.test(id)
       ? await sql`
           update links set disabled_at = coalesce(disabled_at, now()),
-                           disabled_by = case when disabled_at is null then 'admin' else disabled_by end,
+                           disabled_by = 'admin',
                            updated_at = case when disabled_at is null then now() else updated_at end
           where id = ${id} returning id`
       : [];

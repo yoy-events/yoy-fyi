@@ -85,6 +85,13 @@ describe("rescanLinks", () => {
     expect(rows.find((r: { id: string }) => r.id === good).disabled_at).toBeNull();
   });
 
+  test("an unsafe link its owner disabled becomes a Safe Browsing takedown", async () => {
+    const bad = await createLink(sql, serviceId, { code: "bad", target_url: BAD, disabled_at: new Date() });
+    await sql`update links set disabled_by = 'owner' where id = ${bad}`;
+    expect(await rescanLinks(sql, unsafeUrls, new Date())).toBe(1);
+    expect((await sql`select disabled_by from links where id = ${bad}`)[0].disabled_by).toBe("safe_browsing");
+  });
+
   test("with no links, asks nothing", async () => {
     expect(await rescanLinks(sql, unsafeUrls, new Date())).toBe(0);
     expect(asked).toEqual([]);
