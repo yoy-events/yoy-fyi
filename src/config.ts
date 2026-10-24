@@ -21,5 +21,14 @@ export function loadConfig(env = process.env) {
     // Secrets.
     sessionSecret: required("SESSION_SECRET"),
     resendApiKey: required("RESEND_API_KEY"),
+    // Optional Sign in with Google for /admin: the client ID lives in deploy/<stage>.env, the secret
+    // only on the server. Both or neither.
+    google: googleSignIn(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
   };
+}
+
+function googleSignIn(clientId: string | undefined, clientSecret: string | undefined) {
+  if (!clientId && !clientSecret) return undefined;
+  if (!clientId || !clientSecret) throw new Error("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together");
+  return { clientId, clientSecret };
 }

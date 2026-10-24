@@ -202,3 +202,12 @@ The `clicks` table is the outbox. Redirects never write a second row.
 
 1. DNS for `yoy.fyi`: where the zone is hosted now and whether the old Fly certs on `shorty-links` still exist. The runbook needs this.
 2. Whether the redirect outage during deploys is acceptable for links already printed or shared. If it is not, the exit condition applies from day one, at roughly +$3–4/mo for a second machine plus a separate DB machine.
+
+## Amendment (2026-10-24): Sign in with Google for the admin
+
+- `/admin` also accepts Sign in with Google, next to the emailed link. The Google Cloud project is `yoy-fyi`, with one Web client and redirect URIs for `yoy.fyi`, `test.yoy.fyi` and `localhost:3000`, all on `/admin/login/google/callback`.
+- The flow uses the authorization code with PKCE S256, `state` and `nonce`, held in a signed `__Host-` cookie for 10 minutes. The only scopes are `openid email`.
+- Only `ADMIN_EMAIL` with `email_verified: true` gets a session, and the session is the same cookie as the emailed link creates. A pending OAuth authorize request (ADR-0003) resumes after either kind of sign-in.
+- The id_token comes straight from Google's token endpoint over TLS, so the app checks its claims (`iss`, `aud`, `exp`, `nonce`, email) and not its signature, as OpenID Connect Core 3.1.3.7 allows.
+- `GOOGLE_CLIENT_ID` lives in `deploy/<stage>.env`, and `GOOGLE_CLIENT_SECRET` only in `/etc/yoy-fyi/<stage>/app.env`. Without both, the admin offers the emailed link only.
+- The consent screen is External in testing mode, with `newromka@gmail.com` as the test user. Publishing would need a home page and privacy policy, which a one-person admin doesn't need.

@@ -81,7 +81,12 @@ input:not([type="checkbox"]) {
   border-radius: 8px;
 }
 input[type="checkbox"] { width: 20px; height: 20px; }
-button {
+button,
+a.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
   min-height: 44px;
   padding: 8px 16px;
   font: inherit;

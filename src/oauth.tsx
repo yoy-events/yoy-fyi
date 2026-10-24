@@ -233,7 +233,7 @@ export function oauthRoutes(deps: Deps) {
       <Layout title="Sign in">
         <h1>Sign in to connect an app</h1>
         <p>After signing in with the emailed link, you come back here to approve the connection.</p>
-        <LoginForm pending={pendingId} />
+        <LoginForm pending={pendingId} google={!!deps.admin.google} />
       </Layout>,
     );
 

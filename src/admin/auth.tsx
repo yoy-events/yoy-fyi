@@ -7,18 +7,35 @@ import { isUuid } from "../http";
 import { createRateLimiter, rateLimitKey } from "../ratelimit";
 import { Layout } from "./layout";
 
+export type GoogleSignIn = {
+  clientId: string;
+  clientSecret: string;
+  // Posts the token request; replaced in tests.
+  exchange?: (body: URLSearchParams) => Promise<Response>;
+};
+
 export type AdminConfig = {
   email: string;
   sessionSecret: string;
   sendEmail: (mail: { to: string; subject: string; text: string }) => Promise<void>;
+  // Optional second way in: Sign in with Google, accepted only for `email` with a verified address.
+  google?: GoogleSignIn;
 };
 
 type Deps = { sql: SQL; publicOrigin: string; admin: AdminConfig; now: () => Date };
 type Env = { Bindings: { ip?: string } };
 
 const COOKIE = "yfi_admin";
+const GOOGLE_COOKIE = "yfi_google";
 const TOKEN_TTL_MS = 15 * 60_000;
 const SESSION_TTL_MS = 7 * 86_400_000;
+const GOOGLE_FLOW_TTL_MS = 10 * 60_000;
+const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
+const GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
+
+const random = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+const s256 = (v: string) => new Bun.CryptoHasher("sha256").update(v).digest("base64url");
 
 const sha256 = (s: string) => new Bun.CryptoHasher("sha256").update(s).digest("hex");
 
@@ -38,17 +55,46 @@ export function requireAdmin(deps: Pick<Deps, "admin" | "now">) {
 }
 
 // `pending` is an OAuth authorize request to return to after signing in.
-export function LoginForm({ pending }: { pending?: string }) {
+export function LoginForm({ pending, google = false }: { pending?: string; google?: boolean }) {
   return (
-    <form method="post" action="/admin/login" class="stack">
-      {pending && <input type="hidden" name="pending" value={pending} />}
-      <label>
-        Email
-        <input type="email" name="email" required autocomplete="email" />
-      </label>
-      <button type="submit">Email me a sign-in link</button>
-    </form>
+    <div class="stack">
+      {google && (
+        <a class="button" href={pending ? `/admin/login/google?pending=${pending}` : "/admin/login/google"}>
+          Sign in with Google
+        </a>
+      )}
+      <form method="post" action="/admin/login" class="stack">
+        {pending && <input type="hidden" name="pending" value={pending} />}
+        <label>
+          Email
+          <input type="email" name="email" required autocomplete="email" />
+        </label>
+        <button type="submit">Email me a sign-in link</button>
+      </form>
+    </div>
   );
+}
+
+const setSession = (c: Context, admin: AdminConfig, at: Date) =>
+  setSignedCookie(c, COOKIE, `${admin.email}|${at.getTime() + SESSION_TTL_MS}`, admin.sessionSecret, {
+    prefix: "host",
+    httpOnly: true,
+    sameSite: "Lax",
+    path: "/",
+    maxAge: SESSION_TTL_MS / 1000,
+  });
+
+const afterSignIn = (pending: string | null | undefined) => (pending ? `/oauth/authorize?pending=${pending}` : "/admin");
+
+// The id_token comes straight from Google's token endpoint over TLS, so its claims are checked
+// and its signature is not (OpenID Connect Core 3.1.3.7, step 6).
+function idTokenClaims(idToken: unknown): Record<string, unknown> | null {
+  if (typeof idToken !== "string") return null;
+  try {
+    return JSON.parse(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
 }
 
 export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
@@ -59,11 +105,88 @@ export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
     <Layout title="Sign in">
       <h1>Sign in</h1>
       {message && <p class="notice">{message}</p>}
-      <LoginForm />
+      <LoginForm google={!!admin.google} />
     </Layout>
   );
 
   app.get("/login", (c) => c.html(loginPage()));
+
+  const google = admin.google;
+  if (google) {
+    const redirectUri = `${publicOrigin}/admin/login/google/callback`;
+    const exchange = google.exchange ?? ((body: URLSearchParams) => fetch(GOOGLE_TOKEN, { method: "POST", body, signal: AbortSignal.timeout(10_000) }));
+
+    app.get("/login/google", async (c) => {
+      const ip = c.env?.ip;
+      if (ip && !limitLogin(rateLimitKey(ip)).ok) return c.html(loginPage("Too many attempts. Try again later."), 429);
+      const pending = isUuid(c.req.query("pending") ?? "") ? c.req.query("pending")! : null;
+      const flow = { state: random(), verifier: random(), nonce: random(), pending, exp: now().getTime() + GOOGLE_FLOW_TTL_MS };
+      await setSignedCookie(c, GOOGLE_COOKIE, Buffer.from(JSON.stringify(flow)).toString("base64url"), admin.sessionSecret, {
+        prefix: "host",
+        httpOnly: true,
+        sameSite: "Lax",
+        path: "/",
+        maxAge: GOOGLE_FLOW_TTL_MS / 1000,
+      });
+      const url = new URL(GOOGLE_AUTH);
+      for (const [k, v] of Object.entries({
+        client_id: google.clientId,
+        redirect_uri: redirectUri,
+        response_type: "code",
+        scope: "openid email",
+        state: flow.state,
+        nonce: flow.nonce,
+        code_challenge: s256(flow.verifier),
+        code_challenge_method: "S256",
+        login_hint: admin.email,
+        prompt: "select_account",
+      })) {
+        url.searchParams.set(k, v);
+      }
+      return c.redirect(url.toString(), 302);
+    });
+
+    app.get("/login/google/callback", async (c) => {
+      const refuse = (message: string) => c.html(loginPage(message), 400);
+      const raw = await getSignedCookie(c, admin.sessionSecret, GOOGLE_COOKIE, "host");
+      deleteCookie(c, GOOGLE_COOKIE, { prefix: "host", path: "/", secure: true });
+      let flow: { state?: string; verifier?: string; nonce?: string; pending?: string | null; exp?: number } = {};
+      try {
+        flow = typeof raw === "string" ? JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) : {};
+      } catch {}
+      const q = c.req.query();
+      if (!flow.state || q.state !== flow.state || !(Number(flow.exp) > now().getTime())) {
+        return refuse("That sign-in attempt expired. Try again.");
+      }
+      if (q.error) return refuse("Google sign-in was cancelled.");
+      if (!q.code) return refuse("Google did not return a sign-in code. Try again.");
+
+      const res = await exchange(
+        new URLSearchParams({
+          code: q.code,
+          client_id: google.clientId,
+          client_secret: google.clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: "authorization_code",
+          code_verifier: flow.verifier!,
+        }),
+      ).catch(() => null);
+      const body = res?.ok ? await res.json().catch(() => null) : null;
+      const claims = idTokenClaims(body?.id_token);
+      const valid =
+        claims &&
+        GOOGLE_ISSUERS.includes(String(claims.iss)) &&
+        claims.aud === google.clientId &&
+        Number(claims.exp) * 1000 > now().getTime() &&
+        claims.nonce === flow.nonce &&
+        claims.email_verified === true &&
+        String(claims.email).toLowerCase() === admin.email.toLowerCase();
+      if (!valid) return refuse("That Google account cannot sign in here.");
+
+      await setSession(c, admin, now());
+      return c.redirect(afterSignIn(flow.pending), 303);
+    });
+  }
 
   // Always the same answer, so the page does not reveal which address is the admin's.
   app.post("/login", async (c) => {
@@ -122,14 +245,8 @@ export function authRoutes({ sql, publicOrigin, admin, now }: Deps) {
         400,
       );
     }
-    await setSignedCookie(c, COOKIE, `${admin.email}|${at.getTime() + SESSION_TTL_MS}`, admin.sessionSecret, {
-      prefix: "host",
-      httpOnly: true,
-      sameSite: "Lax",
-      path: "/",
-      maxAge: SESSION_TTL_MS / 1000,
-    });
-    return c.redirect(used.pending_id ? `/oauth/authorize?pending=${used.pending_id}` : "/admin", 303);
+    await setSession(c, admin, at);
+    return c.redirect(afterSignIn(used.pending_id), 303);
   });
 
   app.post("/logout", (c) => {
