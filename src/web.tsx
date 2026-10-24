@@ -43,7 +43,7 @@ type Deps = {
 };
 type Env = { Variables: { user: User } };
 
-function Page({ title, user, children }: { title: string; user?: User | null; children: Child }) {
+function Page({ title, user, og, children }: { title: string; user?: User | null; og?: { title: string; description?: string }; children: Child }) {
   return (
     <html lang="en">
       <head>
@@ -51,6 +51,8 @@ function Page({ title, user, children }: { title: string; user?: User | null; ch
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <title>{title === "yoy.fyi" ? title : `${title} · yoy.fyi`}</title>
         <link rel="stylesheet" href="/static/admin.css" />
+        {og && <meta property="og:title" content={og.title} />}
+        {og?.description && <meta property="og:description" content={og.description} />}
         <script src="/static/copy.js" defer></script>
       </head>
       <body>
@@ -61,6 +63,7 @@ function Page({ title, user, children }: { title: string; user?: User | null; ch
           {user && <a href="/account/keys">API keys</a>}
           {user && <a href="/account/apps">Connected apps</a>}
           {user && <a href="/account/telegram">Telegram</a>}
+          {user && <a href="/account/bio">Bio page</a>}
           {user && (
             <form method="post" action="/logout">
               <button type="submit" class="link">
@@ -768,6 +771,116 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
       : [];
     if (!row) return c.notFound();
     return c.redirect("/account/keys", 303);
+  });
+
+  // Link-in-bio: one public page per user at /@handle with chosen short links, which count clicks
+  // like any other visit to them.
+  const HANDLE = /^[a-z0-9][a-z0-9_.-]{2,29}$/;
+  const RESERVED_HANDLES = new Set(["admin", "yoy", "yoyfyi", "support", "help", "api", "root", "account", "login"]);
+  const MAX_BIO_LINKS = 30;
+
+  async function bioForm(c: Context, u: User, values?: { handle: string; title: string; description: string; link: string[] }, errors: string[] = []) {
+    const [page] = await sql`select * from bio_pages where user_id = ${u.id}`;
+    const v = values ?? { handle: page?.handle ?? "", title: page?.title ?? "", description: page?.description ?? "", link: page?.link_ids ?? [] };
+    const links: LinkRow[] = await sql`select * from links where service_id = ${u.serviceId} and disabled_at is null order by id desc limit 200`;
+    return c.html(
+      <Page title="Bio page" user={u}>
+        <h1>Bio page</h1>
+        <p>One page with your links to put in an Instagram or Telegram bio{page && <> : <a href={`/@${page.handle}`}>{`${publicOrigin}/@${page.handle}`}</a></>}.</p>
+        <form method="post" action="/account/bio" class="stack card">
+          {errors.length > 0 && (
+            <ul class="errors">
+              {errors.map((e) => (
+                <li>{e}</li>
+              ))}
+            </ul>
+          )}
+          <label>
+            Address <span class="meta">{publicOrigin}/@…, 3-30 of a-z 0-9 _ . -</span>
+            <input name="handle" required maxlength={30} value={v.handle} />
+          </label>
+          <label>
+            Title
+            <input name="title" maxlength={100} value={v.title} />
+          </label>
+          <label>
+            Description
+            <input name="description" maxlength={300} value={v.description} />
+          </label>
+          <fieldset>
+            <legend>Links, newest first</legend>
+            {links.length === 0 && <p class="meta">Create a short link first.</p>}
+            {links.map((l) => (
+              <label class="check">
+                <input type="checkbox" name="link" value={l.id} checked={v.link.includes(l.id)} /> {l.title ?? l.code}{" "}
+                <span class="meta">{l.target_url}</span>
+              </label>
+            ))}
+          </fieldset>
+          <button type="submit">Save</button>
+        </form>
+      </Page>,
+      errors.length ? 422 : 200,
+    );
+  }
+
+  app.get("/account/bio", (c) => bioForm(c, c.get("user")));
+
+  app.post("/account/bio", async (c) => {
+    const u = c.get("user");
+    const form = await c.req.parseBody({ all: true });
+    const one = (k: string) => String([form[k] ?? ""].flat()[0] ?? "").trim();
+    const values = { handle: one("handle").toLowerCase(), title: one("title"), description: one("description"), link: [form.link ?? []].flat().map(String) };
+    const errors: string[] = [];
+    if (!HANDLE.test(values.handle)) errors.push("Address (handle): 3-30 characters of a-z 0-9 _ . - starting with a letter or digit.");
+    if (values.title.length > 100) errors.push("Title: at most 100 characters.");
+    if (values.description.length > 300) errors.push("Description: at most 300 characters.");
+    if (values.link.length > MAX_BIO_LINKS) errors.push(`At most ${MAX_BIO_LINKS} links.`);
+    else if (values.link.length) {
+      const own = values.link.every(isUuid) ? await sql`select id from links where service_id = ${u.serviceId} and id in ${sql(values.link)}` : [];
+      if (own.length !== new Set(values.link).size) errors.push("Choose only your own links.");
+    }
+    if (!errors.length && RESERVED_HANDLES.has(values.handle)) errors.push(`${publicOrigin}/@${values.handle} is taken.`);
+    if (!errors.length) {
+      const [taken] = await sql`select 1 from bio_pages where handle = ${values.handle} and user_id <> ${u.id}`;
+      if (taken) errors.push(`${publicOrigin}/@${values.handle} is taken.`);
+    }
+    if (errors.length) return bioForm(c, u, values, errors);
+    await sql`
+      insert into bio_pages (user_id, handle, title, description, link_ids, updated_at)
+      values (${u.id}, ${values.handle}, ${values.title || null}, ${values.description || null}, ${sql.array([...new Set(values.link)], "uuid")}, ${now()})
+      on conflict (user_id) do update set handle = excluded.handle, title = excluded.title, description = excluded.description,
+        link_ids = excluded.link_ids, updated_at = excluded.updated_at`;
+    return c.redirect("/account/bio", 303);
+  });
+
+  app.get("/:handle{@[^/]*}", async (c) => {
+    const handle = c.req.param("handle").slice(1);
+    const [page] = HANDLE.test(handle)
+      ? await sql`
+          select b.* from bio_pages b join users u on u.id = b.user_id join services s on s.owner_user_id = u.id
+          where b.handle = ${handle} and u.disabled_at is null and s.disabled_at is null`
+      : [];
+    if (!page) return c.notFound();
+    const links: LinkRow[] = await sql`
+      select * from links where id = any(${page.link_ids}) and disabled_at is null and (expires_at is null or expires_at > ${now()})
+      order by id desc`;
+    const title = page.title ?? `@${page.handle}`;
+    return c.html(
+      <Page title={title} og={{ title, description: page.description ?? undefined }}>
+        <h1>{title}</h1>
+        {page.description && <p>{page.description}</p>}
+        <ul class="list">
+          {links.map((l) => (
+            <li>
+              <a class="button" href={`${publicOrigin}/${l.code}`}>
+                {l.title ?? new URL(l.target_url).hostname}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </Page>,
+    );
   });
 
   // Connecting a Telegram account to the bot: a one-time token in a t.me deep link (ADR-0006).

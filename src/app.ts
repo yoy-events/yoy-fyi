@@ -113,7 +113,7 @@ export function createApp({
   app.use((c, next) => {
     const path = c.req.path;
     // The personal pages (ADR-0004) load the same stylesheet and QR images and post forms like the admin.
-    if (path.startsWith("/admin") || path === "/" || /^\/(links|account|privacy|terms|login|logout)(\/|$)/.test(path)) {
+    if (path.startsWith("/admin") || path === "/" || path.startsWith("/@") || /^\/(links|account|privacy|terms|login|logout)(\/|$)/.test(path)) {
       return adminHeaders(c, next);
     }
     return path.startsWith("/oauth") ? oauthHeaders(c, next) : publicHeaders(c, next);
