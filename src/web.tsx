@@ -7,7 +7,7 @@ import type { Child } from "hono/jsx";
 import QRCode from "qrcode";
 import { type AdminConfig, startGoogle } from "./admin/auth";
 import { BarChart, Ranking } from "./admin/charts";
-import { linkBody } from "./admin/links";
+import { linkBody, previewFrom } from "./admin/links";
 import { timeseries, breakdown } from "./analytics";
 import { isUuid } from "./http";
 import { type Scope, issueKey } from "./keys";
@@ -81,7 +81,28 @@ const CHANNELS = [
   ["email", "email", "email"],
 ] as const;
 
-const OPTIONAL = ["title", "code", "tags", "utm_source", "utm_medium", "utm_campaign"] as const;
+const OPTIONAL = ["title", "code", "tags", "utm_source", "utm_medium", "utm_campaign", "preview_title", "preview_description", "preview_image"] as const;
+
+// What Telegram, Facebook and others show when the short link is shared.
+function PreviewFields({ values }: { values: Record<string, string | undefined> }) {
+  return (
+    <fieldset>
+      <legend>Preview in Telegram, Facebook and other apps</legend>
+      <label>
+        Preview title
+        <input name="preview_title" maxlength={200} value={values.preview_title ?? ""} />
+      </label>
+      <label>
+        Preview description
+        <input name="preview_description" maxlength={500} value={values.preview_description ?? ""} />
+      </label>
+      <label>
+        Preview image URL <span class="meta">https, 1200×630 or larger</span>
+        <input type="url" name="preview_image" value={values.preview_image ?? ""} placeholder="https://" />
+      </label>
+    </fieldset>
+  );
+}
 
 // One field to start with, like Bitly and Dub; the rest waits under More options (no JavaScript).
 function CreateForm({ values = {}, errors = [] }: { values?: Record<string, string>; errors?: string[] }) {
@@ -120,6 +141,7 @@ function CreateForm({ values = {}, errors = [] }: { values?: Record<string, stri
               <input name={k} value={values[k] ?? ""} />
             </label>
           ))}
+          <PreviewFields values={values} />
         </div>
       </details>
       <button type="submit">Shorten</button>
@@ -293,6 +315,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     title: f.title || null,
     tags: (f.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean),
     expires_at: f.expires_at ? `${f.expires_at}:00Z` : null,
+    preview: previewFrom(f),
   });
   const errorList = (r: { message: string; details?: Record<string, unknown> }) => {
     const fields = (r.details?.fields ?? {}) as Record<string, string>;
@@ -308,6 +331,9 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
       title: row.title ?? "",
       tags: row.tags.join(", "),
       expires_at: row.expires_at ? row.expires_at.toISOString().slice(0, 16) : "",
+      preview_title: row.preview?.title ?? "",
+      preview_description: row.preview?.description ?? "",
+      preview_image: row.preview?.image ?? "",
     };
     const dayEnd = Math.floor(now().getTime() / DAY) * DAY + DAY;
     const scope = { serviceId: u.serviceId, linkId: link.id, tag: null, from: new Date(dayEnd - 30 * DAY), to: new Date(dayEnd), bots: "exclude" as const };
@@ -387,6 +413,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
                 Expires <span class="meta">UTC, empty for never</span>
                 <input type="datetime-local" name="expires_at" value={values.expires_at} />
               </label>
+              <PreviewFields values={values} />
               <button type="submit">Save</button>
             </form>
           </details>

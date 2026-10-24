@@ -7,7 +7,7 @@ import { requireKey } from "./auth";
 import { type Click, describeUserAgent, insertClick, queryFields, refererHost } from "./click";
 import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
 import { keyRoutes } from "./keys";
-import { linkRoutes } from "./links";
+import { type Preview, linkRoutes } from "./links";
 import { mcpRoutes } from "./mcp";
 import { webRoutes } from "./web";
 import { type FetchClientMetadata, fetchClientMetadata, oauthRoutes } from "./oauth";
@@ -44,8 +44,22 @@ type LinkRow = {
   service_id: string;
   target_url: string;
   utm_defaults: Record<string, string> | null;
+  preview: Preview | null;
   pass_click_id: boolean;
   gone: boolean;
+};
+
+// Link-preview fetchers of chat apps and social networks. They get the link's own preview.
+const PREVIEW_BOTS = /TelegramBot|facebookexternalhit|Facebot|Twitterbot|LinkedInBot|Slackbot|WhatsApp|Discordbot|Viber|SkypeUriPreview|redditbot|Pinterest|vkShare/i;
+
+const escapeHtml = (s: string) =>
+  s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
+
+// og:site_name is always the target's host, so a preview never hides where the link goes.
+const previewPage = (preview: Preview, shortUrl: string, location: string) => {
+  const meta = (property: string, content: string | undefined) =>
+    content === undefined ? "" : `<meta property="${property}" content="${escapeHtml(content)}">`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(preview.title)}</title>${meta("og:title", preview.title)}${meta("og:description", preview.description)}${meta("og:image", preview.image)}${meta("og:url", shortUrl)}${meta("og:site_name", new URL(location).hostname)}<meta name="twitter:card" content="${preview.image ? "summary_large_image" : "summary"}"><meta http-equiv="refresh" content="0;url=${escapeHtml(location)}"></head><body><a href="${escapeHtml(location)}">${escapeHtml(preview.title)}</a></body></html>`;
 };
 
 const page = (title: string, body: string) =>
@@ -139,7 +153,7 @@ export function createApp({
 
     // A blocked owner's service takes its links down too (ADR-0004).
     const [link]: LinkRow[] = await sql`
-      select l.id, l.service_id, l.target_url, l.utm_defaults, l.pass_click_id,
+      select l.id, l.service_id, l.target_url, l.utm_defaults, l.preview, l.pass_click_id,
              (l.disabled_at is not null or l.expires_at <= now() or s.disabled_at is not null) as gone
       from links l join services s on s.id = l.service_id where l.code = ${code}`;
     if (!link) return c.html(page("Not found", "This short link does not exist."), 404);
@@ -181,6 +195,9 @@ export function createApp({
     }
 
     c.header("Cache-Control", "no-store");
+    if (link.preview && PREVIEW_BOTS.test(c.req.header("user-agent") ?? "")) {
+      return c.html(previewPage(link.preview, `${publicOrigin}/${code}`, location));
+    }
     return c.redirect(location, 302);
   });
 

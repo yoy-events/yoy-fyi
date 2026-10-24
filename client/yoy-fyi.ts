@@ -5,6 +5,7 @@ export type Tag = string;
 export type Bots = "exclude" | "include" | "only";
 export type Dimension = "referer_host" | "utm_source" | "utm_medium" | "utm_campaign" | "country" | "device" | "browser" | "os";
 
+export type Preview = { title: string; description?: string; image?: string };
 export type UtmDefaults = Partial<Record<"utm_source" | "utm_medium" | "utm_campaign" | "utm_term" | "utm_content", string>>;
 export type ExternalRef = { service: string; entity_type: string; entity_id: string };
 
@@ -14,6 +15,7 @@ export type LinkCreate = {
   title?: string;
   tags?: Tag[];
   utm_defaults?: UtmDefaults;
+  preview?: Preview;
   pass_click_id?: boolean;
   expires_at?: string;
   external_ref?: ExternalRef;
@@ -24,6 +26,7 @@ export type LinkUpdate = {
   title?: string | null;
   tags?: Tag[];
   utm_defaults?: UtmDefaults | null;
+  preview?: Preview | null;
   pass_click_id?: boolean;
   expires_at?: string | null;
 };
@@ -36,6 +39,7 @@ export type Link = {
   title: string | null;
   tags: Tag[];
   utm_defaults: UtmDefaults | null;
+  preview: Preview | null;
   pass_click_id: boolean;
   expires_at: string | null;
   external_ref: ExternalRef | null;

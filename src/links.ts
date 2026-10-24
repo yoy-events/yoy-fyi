@@ -30,6 +30,7 @@ export type LinkRow = {
   title: string | null;
   tags: string[];
   utm_defaults: Record<string, string> | null;
+  preview: Preview | null;
   pass_click_id: boolean;
   expires_at: Date | null;
   ext_service: string | null;
@@ -42,6 +43,9 @@ export type LinkRow = {
   created_via: CreatedVia;
 };
 
+// The Open Graph preview link-preview bots see instead of the redirect (see app.ts).
+export type Preview = { title: string; description?: string; image?: string };
+
 export type CreatedVia = "api" | "admin" | "mcp" | "web";
 
 export type LinkInput = {
@@ -50,6 +54,7 @@ export type LinkInput = {
   title?: string;
   tags?: string[];
   utm_defaults?: Record<string, string>;
+  preview?: Preview;
   pass_click_id?: boolean;
   expires_at?: string;
   external_ref?: { service: string; entity_type: string; entity_id: string };
@@ -80,6 +85,16 @@ const FIELDS: Record<string, Check> = {
     rule: "object of utm_source, utm_medium, utm_campaign, utm_term, utm_content strings",
     nullable: true,
   },
+  preview: {
+    ok: (v) =>
+      isPlainObject(v) &&
+      Object.keys(v).every((k) => ["title", "description", "image"].includes(k)) &&
+      isString(v.title, 1, 200) &&
+      (v.description === undefined || isString(v.description, 0, 500)) &&
+      (v.image === undefined || (isString(v.image, 1, 2048) && /^https:\/\/[^\s]+$/.test(v.image) && URL.canParse(v.image))),
+    rule: "object with title (1-200), optional description (up to 500) and image (https URL)",
+    nullable: true,
+  },
   pass_click_id: { ok: (v) => typeof v === "boolean", rule: "boolean" },
   expires_at: {
     ok: (v, now) => typeof v === "string" && RFC3339.test(v) && Date.parse(v) > now.getTime(),
@@ -97,7 +112,7 @@ const FIELDS: Record<string, Check> = {
   },
 };
 
-const UPDATABLE = new Set(["target_url", "title", "tags", "utm_defaults", "pass_click_id", "expires_at"]);
+const UPDATABLE = new Set(["target_url", "title", "tags", "utm_defaults", "preview", "pass_click_id", "expires_at"]);
 
 function checkFields(body: Record<string, unknown>, allowNull: boolean, now: Date): Record<string, string> {
   const fields: Record<string, string> = {};
@@ -132,6 +147,7 @@ export function toLink(row: LinkRow, publicOrigin: string, now = new Date()) {
     title: row.title,
     tags: row.tags,
     utm_defaults: row.utm_defaults,
+    preview: row.preview,
     pass_click_id: row.pass_click_id,
     expires_at: row.expires_at,
     external_ref: row.ext_service
@@ -187,6 +203,24 @@ async function findExisting(sql: SQL, serviceId: string, key: string | null, has
   return null;
 }
 
+// The target and the preview image pass the same policy, Safe Browsing included: bots fetch the
+// image, and a preview must not point people at what the target check would refuse.
+async function rejectedUrl(
+  body: Record<string, unknown>,
+  opts: { ownHost: string; resolveHost?: (host: string) => Promise<string[]>; unsafeUrls?: UnsafeUrls },
+) {
+  const image = (body.preview as Preview | null | undefined)?.image;
+  for (const [field, url] of [["target_url", body.target_url], ["preview.image", image]] as const) {
+    if (typeof url !== "string") continue;
+    const reason = await checkTarget(url, { ownHost: opts.ownHost, resolve: opts.resolveHost, unsafeUrls: opts.unsafeUrls });
+    if (reason) {
+      const message = field === "target_url" ? "The target URL is not allowed." : "The preview image URL is not allowed.";
+      return { kind: "error", status: 422, code: "target_rejected", message, details: field === "target_url" ? { reason } : { reason, field } } as const;
+    }
+  }
+  return null;
+}
+
 // Creates a link for a service with every rule the API applies: validation, idempotency,
 // reserved codes, the target policy and code generation. Shared by /v1 and the admin UI.
 export async function createLink(
@@ -223,26 +257,18 @@ export async function createLink(
   if (input.code && RESERVED.has(input.code.toLowerCase())) {
     return { kind: "error", status: 422, code: "code_reserved", message: `"${input.code}" is a reserved path.` };
   }
-  const rejection = await checkTarget(input.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
-  if (rejection) {
-    return {
-      kind: "error",
-      status: 422,
-      code: "target_rejected",
-      message: "The target URL is not allowed.",
-      details: { reason: rejection },
-    };
-  }
+  const rejected = await rejectedUrl(body, { ownHost, resolveHost, unsafeUrls });
+  if (rejected) return rejected;
 
   for (let attempt = 0; ; attempt++) {
     const code = input.code ?? randomBase62(7);
     try {
       const [row]: LinkRow[] = await sql`
-        insert into links (id, service_id, code, target_url, title, tags, utm_defaults, pass_click_id,
+        insert into links (id, service_id, code, target_url, title, tags, utm_defaults, preview, pass_click_id,
                            expires_at, ext_service, ext_entity_type, ext_entity_id, idempotency_key, idempotency_hash,
                            created_via)
         values (${Bun.randomUUIDv7()}, ${serviceId}, ${code}, ${input.target_url}, ${input.title ?? null},
-                ${sql.array(input.tags ?? [], "text")}, ${input.utm_defaults ?? null}, ${input.pass_click_id ?? false},
+                ${sql.array(input.tags ?? [], "text")}, ${input.utm_defaults ?? null}, ${input.preview ?? null}, ${input.pass_click_id ?? false},
                 ${input.expires_at ?? null}, ${input.external_ref?.service ?? null},
                 ${input.external_ref?.entity_type ?? null}, ${input.external_ref?.entity_id ?? null},
                 ${idempotencyKey}, ${idempotencyKey ? hash : null}, ${createdVia})
@@ -298,12 +324,8 @@ export async function updateLink(
   if (!link) return { kind: "error", status: 404, code: "not_found", message: "Link not found." };
   const disabled = { kind: "error", status: 409, code: "link_disabled", message: "A disabled link cannot be changed." } as const;
   if (link.disabled_at) return disabled;
-  if (typeof body.target_url === "string") {
-    const rejection = await checkTarget(body.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
-    if (rejection) {
-      return { kind: "error", status: 422, code: "target_rejected", message: "The target URL is not allowed.", details: { reason: rejection } };
-    }
-  }
+  const rejected = await rejectedUrl(body, { ownHost, resolveHost, unsafeUrls });
+  if (rejected) return rejected;
 
   const changes = { ...body, updated_at: new Date() } as Record<string, unknown>;
   if (Array.isArray(body.tags)) changes.tags = sql.array(body.tags, "text");
