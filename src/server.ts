@@ -36,6 +36,7 @@ const app = createApp({
     email: config.adminEmail,
     sessionSecret: config.sessionSecret,
     sendEmail: resendSender(config.resendApiKey, config.mailFrom),
+    google: config.google,
   },
 });
 
