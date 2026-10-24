@@ -338,10 +338,12 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
               Disable link
             </button>
           </form>
-        ) : (
+        ) : row.disabled_by === "owner" ? (
           <form method="post" action={`/links/${link.id}/enable`}>
             <button type="submit">Enable link</button>
           </form>
+        ) : (
+          <p class="meta">yoy.fyi disabled this link. Contact {admin.email} if you think that is a mistake.</p>
         )}
       </Page>,
       status,
@@ -366,15 +368,20 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     return linkPage(c, u, row, { values, errors: errorList(result) }, result.status);
   });
 
-  // Re-enabling checks the target again, so a link disabled for an unsafe target stays down.
+  // Only what the owner disabled can be re-enabled here; admin and Safe Browsing takedowns
+  // stay down. The target is checked again in case it changed since.
   app.post("/links/:id/enable", async (c) => {
     const u = c.get("user");
     const row = await ownLink(u, c.req.param("id"));
     if (!row) return c.notFound();
     if (row.disabled_at) {
+      const refuse = (why: string) => linkPage(c, u, row, { values: {}, errors: [`This link cannot be enabled: ${why}.`] }, 422);
+      if (row.disabled_by !== "owner") return refuse("it was disabled by yoy.fyi");
       const rejection = await checkTarget(row.target_url, { ownHost, resolve: resolveHost, unsafeUrls });
-      if (rejection) return linkPage(c, u, row, { values: {}, errors: [`This link cannot be enabled: its target is not allowed (${rejection}).`] }, 422);
-      await sql`update links set disabled_at = null, updated_at = ${now()} where id = ${row.id} and service_id = ${u.serviceId}`;
+      if (rejection) return refuse(`its target is not allowed (${rejection})`);
+      await sql`
+        update links set disabled_at = null, disabled_by = null, updated_at = ${now()}
+        where id = ${row.id} and service_id = ${u.serviceId} and disabled_by = 'owner'`;
     }
     return c.redirect(`/links/${row.id}`, 303);
   });
@@ -396,7 +403,9 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     const u = c.get("user");
     const id = c.req.param("id");
     if (!(await ownLink(u, id))) return c.notFound();
-    await sql`update links set disabled_at = coalesce(disabled_at, ${now()}), updated_at = ${now()} where id = ${id} and service_id = ${u.serviceId}`;
+    await sql`
+      update links set disabled_at = ${now()}, disabled_by = 'owner', updated_at = ${now()}
+      where id = ${id} and service_id = ${u.serviceId} and disabled_at is null`;
     return c.redirect(`/links/${id}`, 303);
   });
 

@@ -149,8 +149,15 @@ describe("enabling a disabled link", () => {
     expect((await get("/annlink", "")).status).toBe(302);
   });
 
+  test.each(["admin", "safe_browsing", null])("a link disabled by %p cannot be enabled by its owner", async (by) => {
+    await sql`update links set disabled_at = ${now}, disabled_by = ${by} where id = ${id}`;
+    expect(await (await get(`/links/${id}`)).text()).not.toContain(`action="/links/${id}/enable"`);
+    expect((await post(`/links/${id}/enable`, {})).status).toBe(422);
+    expect((await link()).disabled_at).not.toBeNull();
+  });
+
   test("a link whose target is now unsafe stays disabled", async () => {
-    await sql`update links set target_url = ${UNSAFE}, disabled_at = ${now} where id = ${id}`;
+    await sql`update links set target_url = ${UNSAFE}, disabled_at = ${now}, disabled_by = 'owner' where id = ${id}`;
     const res = await post(`/links/${id}/enable`, {});
     expect(res.status).toBe(422);
     expect((await link()).disabled_at).not.toBeNull();

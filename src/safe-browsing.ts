@@ -49,7 +49,7 @@ export async function rescanLinks(sql: SQL, unsafeUrls: UnsafeUrls, now: Date): 
   const unsafe = [...(await unsafeUrls(rows.map((r) => r.target_url)))];
   if (unsafe.length === 0) return 0;
   const disabled = await sql`
-    update links set disabled_at = ${now}, updated_at = ${now}
+    update links set disabled_at = ${now}, disabled_by = 'safe_browsing', updated_at = ${now}
     where disabled_at is null and target_url in ${sql(unsafe)}
     returning id, code, target_url`;
   for (const l of disabled) console.warn("link disabled: unsafe target", { id: l.id, code: l.code, target_url: l.target_url });

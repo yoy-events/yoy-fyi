@@ -79,8 +79,9 @@ describe("rescanLinks", () => {
     expect(await rescanLinks(sql, unsafeUrls, new Date())).toBe(1);
 
     expect(asked.flat().sort()).toEqual([GOOD, BAD].sort());
-    const rows = await sql`select id, disabled_at from links where id in (${bad}, ${good}) order by code`;
+    const rows = await sql`select id, disabled_at, disabled_by from links where id in (${bad}, ${good}) order by code`;
     expect(rows.find((r: { id: string }) => r.id === bad).disabled_at).not.toBeNull();
+    expect(rows.find((r: { id: string }) => r.id === bad).disabled_by).toBe("safe_browsing");
     expect(rows.find((r: { id: string }) => r.id === good).disabled_at).toBeNull();
   });
 

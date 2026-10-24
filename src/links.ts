@@ -38,6 +38,7 @@ export type LinkRow = {
   created_at: Date;
   updated_at: Date;
   disabled_at: Date | null;
+  disabled_by: "owner" | "admin" | "safe_browsing" | null;
   created_via: CreatedVia;
 };
 
@@ -398,6 +399,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createL
     const [row] = isUuid(id)
       ? await sql`
           update links set disabled_at = coalesce(disabled_at, now()),
+                           disabled_by = case when disabled_at is null then 'owner' else disabled_by end,
                            updated_at = case when disabled_at is null then now() else updated_at end
           where id = ${id} and service_id = ${c.get("caller").serviceId}
           returning *`

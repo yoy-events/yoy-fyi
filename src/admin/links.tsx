@@ -248,6 +248,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls }: Deps)
     const [row] = /^[0-9a-f-]{36}$/i.test(id)
       ? await sql`
           update links set disabled_at = coalesce(disabled_at, now()),
+                           disabled_by = case when disabled_at is null then 'admin' else disabled_by end,
                            updated_at = case when disabled_at is null then now() else updated_at end
           where id = ${id} returning id`
       : [];
