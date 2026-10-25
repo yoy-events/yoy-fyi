@@ -442,3 +442,52 @@ describe("landing and guide in four languages", () => {
     }
   });
 });
+
+describe("signed-in pages in the visitor's language", () => {
+  const withLang = (cookie: string, lang: string) => `${cookie}; yfi_lang=${lang}`;
+
+  test.each([
+    ["en", "My links", "Shorten"],
+    ["es", "Mis enlaces", "Acortar"],
+    ["fr", "Mes liens", "Raccourcir"],
+    ["uk", "Мої посилання", "Скоротити"],
+  ])("with the %s cookie the home page is in that language", async (lang, h1, button) => {
+    const { cookie } = await signIn();
+    const html = await (await get("/", withLang(cookie, lang))).text();
+    expect(html).toContain(`<html lang="${lang}">`);
+    expect(html).toContain(`<h1>${h1}</h1>`);
+    expect(html).toContain(button);
+  });
+
+  test("without a cookie, the browser's language is used, and an unknown one falls back to Ukrainian", async () => {
+    const { cookie } = await signIn();
+    const fr = await app.request(`${ORIGIN}/account/keys`, { headers: { cookie, "accept-language": "fr-FR,fr;q=0.9" } });
+    expect(await fr.text()).toContain("<h1>Clés d&#39;API</h1>");
+    const de = await app.request(`${ORIGIN}/account/keys`, { headers: { cookie, "accept-language": "de-DE" } });
+    expect(await de.text()).toContain("<h1>API-ключі</h1>");
+  });
+
+  test("validation errors come in the page's language", async () => {
+    const { cookie } = await signIn();
+    const res = await post("/links", { target_url: "ftp://example.com/" }, withLang(cookie, "en"));
+    expect(await res.text()).toContain("The address is not allowed");
+  });
+
+  test("/lang/en sets the cookie and returns to the page it came from; other origins go home", async () => {
+    const res = await app.request(`${ORIGIN}/lang/en`, { headers: { referer: `${ORIGIN}/account/keys` } });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/account/keys");
+    expect(res.headers.get("set-cookie")).toContain("yfi_lang=en");
+    const away = await app.request(`${ORIGIN}/lang/fr`, { headers: { referer: "https://evil.example/x" } });
+    expect(away.headers.get("location")).toBe("/");
+  });
+
+  test("an unknown language is not a switch", async () => {
+    expect((await get("/lang/de")).status).toBe(404);
+  });
+
+  test("the footer offers the other languages", async () => {
+    const html = await (await get("/privacy")).text();
+    for (const l of ["en", "es", "fr"]) expect(html).toContain(`href="/lang/${l}"`);
+  });
+});

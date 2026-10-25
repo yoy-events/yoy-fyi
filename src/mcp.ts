@@ -5,7 +5,8 @@ import type { SQL } from "bun";
 import type { Context } from "hono";
 import { type Caller, authenticate } from "./keys";
 import { OAUTH_SCOPES, authenticateOAuth } from "./oauth";
-import { getBio, saveBio } from "./bio";
+import { bioErrorText, getBio, saveBio } from "./bio";
+import { MESSAGES } from "./messages";
 import { qrOptions, qrPng } from "./qr";
 import { type RateLimit, createRateLimiter } from "./ratelimit";
 
@@ -307,7 +308,7 @@ const TOOLS: Tool[] = [
       if (!id(args)) return toolError("validation_failed: id is required.");
       if (args.caption !== undefined) return toolError("validation_failed: a caption is available only in the SVG on the link's page at yoy.fyi.");
       const style = qrOptions(new URLSearchParams(pick(args, ["fg", "bg"]) as Record<string, string>));
-      if ("error" in style) return toolError(`validation_failed: ${style.error}`);
+      if ("error" in style) return toolError(`validation_failed: ${style.error === "caption" ? MESSAGES.en.qr.caption(40) : MESSAGES.en.qr[style.error]}`);
       const link = await api("GET", `/links/${id(args)}`);
       if (link.isError) return link;
       const shortUrl = String(link.structuredContent!.short_url);
@@ -397,7 +398,7 @@ const TOOLS: Tool[] = [
         { userId, serviceId, publicOrigin: publicOrigin, now: new Date() },
         { handle: text(args.handle), title: text(args.title), description: text(args.description), link: ((args.link_ids as unknown[]) ?? []).map(String) },
       );
-      if ("errors" in saved) return toolError(`validation_failed: ${saved.errors.join(" ")}`);
+      if ("errors" in saved) return toolError(`validation_failed: ${saved.errors.map((e) => bioErrorText(e, "en")).join(" ")}`);
       return ok({ page: { ...saved.page, url: `${publicOrigin}/@${saved.page.handle}` } });
     },
   },
@@ -487,12 +488,16 @@ export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120
         const args = params?.arguments ?? {};
         if (!tool) return rpcError(c, 200, reqId, -32602, `Unknown tool: ${String(params?.name)}`);
         if (typeof args !== "object" || Array.isArray(args)) return rpcError(c, 200, reqId, -32602, "arguments must be an object");
-        // Step-up: an OAuth grant missing the tool's scope gets 403 insufficient_scope, so the client
-        // can ask the user for it. An API key cannot be stepped up and gets the tool's own error.
-        if (tool.scope && caller.client && !caller.scopes.includes(tool.scope as Caller["scopes"][number])) {
-          const wanted = OAUTH_SCOPES.filter((s) => s === tool.scope || caller.scopes.includes(s));
-          c.header("WWW-Authenticate", `Bearer error="insufficient_scope", scope="${wanted.join(" ")}", resource_metadata="${resourceMetadata}"`);
-          return rpcError(c, 403, reqId, -32001, `This connection lacks the ${tool.scope} permission. Reconnect yoy.fyi and allow it.`);
+        // Every tool checks its scope here, including the ones that don't go through /v1. An OAuth
+        // grant gets 403 insufficient_scope (step-up), so the client can ask the user for the scope;
+        // an API key cannot be stepped up and gets a tool error.
+        if (tool.scope && !caller.scopes.includes(tool.scope as Caller["scopes"][number])) {
+          if (caller.client) {
+            const wanted = OAUTH_SCOPES.filter((s) => s === tool.scope || caller.scopes.includes(s));
+            c.header("WWW-Authenticate", `Bearer error="insufficient_scope", scope="${wanted.join(" ")}", resource_metadata="${resourceMetadata}"`);
+            return rpcError(c, 403, reqId, -32001, `This connection lacks the ${tool.scope} permission. Reconnect yoy.fyi and allow it.`);
+          }
+          return ok(toolError(`forbidden: this key lacks the ${tool.scope} scope.`));
         }
         const started = performance.now();
         const result = await tool.run(args as Json, apiFor(caller), { ...caller, sql, publicOrigin });

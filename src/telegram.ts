@@ -5,7 +5,7 @@ import { type Context, Hono } from "hono";
 import { type UnsafeUrls } from "./safe-browsing";
 import { createLink } from "./links";
 import { qrPng } from "./qr";
-import { REASON_UK } from "./uk";
+import { MESSAGES } from "./messages";
 import { createRateLimiter } from "./ratelimit";
 
 export type TelegramApi = {
@@ -128,7 +128,7 @@ export function telegramRoutes({ sql, publicOrigin, telegram, now, resolveHost, 
     const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, user.service_id, { target_url: url }, null, "telegram");
     if (result.kind === "error") {
       const reason = String(result.details?.reason ?? "");
-      return reply(chatId, result.code === "target_rejected" ? `Це посилання не дозволене: ${REASON_UK[reason] ?? reason}.` : result.message);
+      return reply(chatId, result.code === "target_rejected" ? `Це посилання не дозволене: ${MESSAGES.uk.reasons[reason] ?? reason}.` : result.message);
     }
     const shortUrl = `${publicOrigin}/${result.row.code}`;
     await telegram.api.sendPhoto(chatId, await qrPng(shortUrl, { fg: "#000000", bg: "#ffffff", caption: null }), shortUrl);

@@ -148,3 +148,17 @@ test("initialize carries instructions for the model", async () => {
   expect(result.instructions).toContain("create_link");
   expect(result.instructions).toContain("get_qr");
 });
+
+test.each([
+  ["update_bio", { handle: "sneaky" }],
+  ["create_links", { links: [{ target_url: "https://example.com/" }] }],
+])("an API key without links:write cannot use %s, even though it skips /v1", async (name, args) => {
+  const user = await upsertGoogleUser(sql, { sub: "g2", email: "bob@example.com", name: "Bob" }, new Date());
+  const [service] = await sql`select slug from services where owner_user_id = ${user!.id}`;
+  const { token: readOnly } = await issueKey(sql, { serviceSlug: service.slug, name: "ro", scopes: ["links:read"] });
+  const result = await tool(name, args, readOnly);
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain("links:write");
+  expect(await sql`select 1 from bio_pages`).toHaveLength(0);
+  expect(await sql`select 1 from links`).toHaveLength(0);
+});
