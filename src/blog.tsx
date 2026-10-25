@@ -204,6 +204,7 @@ export function blogRoutes({ publicOrigin, posts, indexable = true }: { publicOr
         .join("")}</url>`;
     const entries = [
       entry(url("/")),
+      entry(url("/docs/mcp")),
       entry(url("/privacy")),
       entry(url("/terms")),
       ...LANGS.map((l) => entry(url(`/blog/${l}`), indexAlternates)),
@@ -228,6 +229,7 @@ export function blogRoutes({ publicOrigin, posts, indexable = true }: { publicOr
         "",
         `- MCP server (Streamable HTTP, OAuth 2.1): ${url("/mcp")}`,
         "- In claude.ai or ChatGPT, add it as a custom connector with that URL, then sign in with Google.",
+        `- Setup guide (Ukrainian): ${url("/docs/mcp")}`,
         "- Tools: create_link, create_links, update_link, disable_link, list_links (search), get_link, get_qr (PNG image), get_click_timeseries, get_click_breakdown, get_bio, update_bio, whoami.",
         "",
         "## API",

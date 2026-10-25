@@ -375,3 +375,27 @@ test("without a Telegram bot, the header has no Telegram link", async () => {
   const { cookie } = await signIn();
   expect(await (await get("/", cookie)).text()).not.toContain('href="/account/telegram"');
 });
+
+describe("landing and docs for search engines and AI", () => {
+  test("the signed-out home page has a description, canonical URL, FAQ and app JSON-LD, and links to the guide", async () => {
+    const html = await (await get("/")).text();
+    expect(html).toContain('<meta name="description"');
+    expect(html).toContain(`<link rel="canonical" href="${ORIGIN}/"/>`);
+    const ld = JSON.parse(/<script type="application\/ld\+json">(.*?)<\/script>/.exec(html)![1]!);
+    expect(ld["@graph"].map((n: { "@type": string }) => n["@type"])).toEqual(["WebApplication", "FAQPage"]);
+    expect(html).toContain('href="/docs/mcp"');
+    expect(html).toContain(`${ORIGIN}/mcp`);
+  });
+
+  test("/docs/mcp explains every client, signed in or not", async () => {
+    const res = await get("/docs/mcp");
+    const html = await res.text();
+    expect(res.status).toBe(200);
+    for (const text of ["claude.ai", "ChatGPT", "claude mcp add --transport http", "mcpServers", "get_qr"]) expect(html).toContain(text);
+    expect(res.headers.get("content-security-policy")).toContain("style-src 'self'");
+  });
+
+  test("the sitemap lists the guide", async () => {
+    expect(await (await get("/sitemap.xml")).text()).toContain(`<loc>${ORIGIN}/docs/mcp</loc>`);
+  });
+});
