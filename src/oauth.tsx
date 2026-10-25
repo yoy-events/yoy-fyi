@@ -159,7 +159,7 @@ export function oauthRoutes(deps: Deps) {
   const { sql, publicOrigin, now } = deps;
   const resource = `${publicOrigin}/mcp`;
   const app = new Hono<Env>();
-  const limitUnknownFetch = createRateLimiter({ perMinute: 30 / 60, burst: 30 });
+  const limitUnknownFetch = createRateLimiter({ perMinute: 10 / 60, burst: 10 });
   const limitAuthorize = createRateLimiter(deps.authorizeLimit ?? { perMinute: 30, burst: 30 });
   const limitToken = createRateLimiter(deps.tokenLimit ?? { perMinute: 20, burst: 20 });
   // Who is approving: the admin (any service) or a user (their own service only). Admin wins.
@@ -216,7 +216,7 @@ export function oauthRoutes(deps: Deps) {
   type Client = { name: string; redirect_uris: string[]; verified: boolean; domain: string | null };
 
   // A registered (dcr_) client from the table, or a metadata-document client, cached for a day.
-  async function loadClient(clientId: string): Promise<Client | null> {
+  async function loadClient(clientId: string, ip?: string): Promise<Client | null> {
     if (clientId.startsWith("dcr_")) {
       const [row] = await sql`select name, redirect_uris from oauth_clients where client_id = ${clientId} and kind = 'dcr'`;
       return row ? { name: row.name, redirect_uris: row.redirect_uris, verified: false, domain: null } : null;
@@ -233,9 +233,12 @@ export function oauthRoutes(deps: Deps) {
     if (cached && now().getTime() - new Date(cached.fetched_at).getTime() < CLIENT_CACHE_MS) {
       return { name: cached.name, redirect_uris: cached.redirect_uris, ...known };
     }
-    // Documents on unknown hosts are fetched at most a few dozen times an hour in total, so the
-    // authorize page can't be used to make yoy.fyi send many requests to arbitrary hosts.
-    if (!known.verified && !limitUnknownFetch("unknown-client-host").ok) return null;
+    // Documents on unknown hosts are fetched a limited number of times per host and per visitor,
+    // so the authorize page can't make yoy.fyi send many requests anywhere. Over the limit, a
+    // stale cached document is still used.
+    if (!known.verified && (!limitUnknownFetch(`host:${url.hostname}`).ok || (ip && !limitUnknownFetch(rateLimitKey(ip)).ok))) {
+      return cached ? { name: cached.name, redirect_uris: cached.redirect_uris, ...known } : null;
+    }
     const doc = await deps.clientMetadata(clientId);
     const uris = doc?.redirect_uris;
     if (!doc || doc.client_id !== clientId || !Array.isArray(uris) || !uris.every((u) => typeof u === "string")) return null;
@@ -354,7 +357,7 @@ export function oauthRoutes(deps: Deps) {
     // Until the client and its redirect are verified, errors stay on this page (no open redirect).
     const clientId = q.client_id ?? "";
     const redirectUri = q.redirect_uri ?? "";
-    const client = await loadClient(clientId);
+    const client = await loadClient(clientId, c.env?.ip);
     if (!client) return errorPage(c, "Не вдалося прочитати опис застосунку.");
     if (!redirectUri || !redirectAllowed(client.redirect_uris, redirectUri)) return errorPage(c, "Адреса повернення не збігається з тією, яку оголосив застосунок.");
 
