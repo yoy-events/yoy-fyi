@@ -117,3 +117,9 @@ The CI smoke step checks that an unauthenticated `POST /mcp` answers with the `W
 
 1. Is the OAuth user always only Roman? If owners of other services should connect themselves, yoy.fyi needs user accounts, which is a different data model.
 2. Should agents write from day one (`create_link`, `update_link`, `disable_link`), or should slice 1 ship read-only tools first?
+
+## Amendment (2026-10-25): revocation, step-up, remembered consent
+
+- `POST /oauth/revoke` (RFC 7009, public clients): either token of a grant revokes the whole grant, only for the grant's own `client_id`; the answer is always 200.
+- A tool call whose scope the OAuth grant lacks answers HTTP 403 with `WWW-Authenticate: Bearer error="insufficient_scope", scope="…"` (the held scopes plus the missing one), so the client can ask the user again. API keys keep the plain tool error, since they cannot be stepped up.
+- A signed-in user who already holds an active grant for the same client with all the requested scopes gets a code without the consent page. The admin always sees consent, because the admin picks a service each time.

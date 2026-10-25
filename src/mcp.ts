@@ -4,7 +4,7 @@
 import type { SQL } from "bun";
 import type { Context } from "hono";
 import { type Caller, authenticate } from "./keys";
-import { authenticateOAuth } from "./oauth";
+import { OAUTH_SCOPES, authenticateOAuth } from "./oauth";
 import { getBio, saveBio } from "./bio";
 import { qrOptions, qrPng } from "./qr";
 import { type RateLimit, createRateLimiter } from "./ratelimit";
@@ -409,7 +409,7 @@ const listed = TOOLS.map(({ run: _, scope, ...tool }) => ({
   securitySchemes: [{ type: "oauth2", scopes: scope ? [scope] : [] }],
 }));
 
-const rpcError = (c: Context, status: 200 | 400, id: unknown, code: number, message: string) =>
+const rpcError = (c: Context, status: 200 | 400 | 403, id: unknown, code: number, message: string) =>
   c.json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } }, status);
 
 export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120, burst: 60 } }: Deps) {
@@ -487,6 +487,13 @@ export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120
         const args = params?.arguments ?? {};
         if (!tool) return rpcError(c, 200, reqId, -32602, `Unknown tool: ${String(params?.name)}`);
         if (typeof args !== "object" || Array.isArray(args)) return rpcError(c, 200, reqId, -32602, "arguments must be an object");
+        // Step-up: an OAuth grant missing the tool's scope gets 403 insufficient_scope, so the client
+        // can ask the user for it. An API key cannot be stepped up and gets the tool's own error.
+        if (tool.scope && caller.client && !caller.scopes.includes(tool.scope as Caller["scopes"][number])) {
+          const wanted = OAUTH_SCOPES.filter((s) => s === tool.scope || caller.scopes.includes(s));
+          c.header("WWW-Authenticate", `Bearer error="insufficient_scope", scope="${wanted.join(" ")}", resource_metadata="${resourceMetadata}"`);
+          return rpcError(c, 403, reqId, -32001, `This connection lacks the ${tool.scope} permission. Reconnect yoy.fyi and allow it.`);
+        }
         const started = performance.now();
         const result = await tool.run(args as Json, apiFor(caller), { ...caller, sql, publicOrigin });
         const ms = Math.round(performance.now() - started);

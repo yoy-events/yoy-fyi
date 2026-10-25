@@ -133,14 +133,25 @@ export function oauthRoutes(deps: Deps) {
   const limitAuthorize = createRateLimiter(deps.authorizeLimit ?? { perMinute: 30, burst: 30 });
   const limitToken = createRateLimiter(deps.tokenLimit ?? { perMinute: 20, burst: 20 });
   // Who is approving: the admin (any service) or a user (their own service only). Admin wins.
-  const approver = async (c: Context): Promise<{ services: { id: string; slug: string }[]; label: string } | null> => {
+  type Approver = { services: { id: string; slug: string }[]; label: string; admin: boolean };
+  const approver = async (c: Context): Promise<Approver | null> => {
     if (await adminSignedIn(c, deps)) {
-      return { services: await sql`select id, slug from services where disabled_at is null order by slug`, label: "the admin" };
+      return { services: await sql`select id, slug from services where disabled_at is null order by slug`, label: "the admin", admin: true };
     }
     const user = await currentUser(c, sql, deps.admin.sessionSecret, now());
     if (!user) return null;
-    return { services: await sql`select id, slug from services where id = ${user.serviceId}`, label: user.email };
+    return { services: await sql`select id, slug from services where id = ${user.serviceId}`, label: user.email, admin: false };
   };
+
+  // Issues an authorization code for a decided request and returns its redirect.
+  async function issueCode(p: { client_id: string; redirect_uri: string; code_challenge: string; resource: string }, serviceId: string, scopes: string[]) {
+    const code = random();
+    await sql`
+      insert into oauth_codes (code_hash, client_id, service_id, scopes, redirect_uri, code_challenge, resource, expires_at)
+      values (${sha256(code)}, ${p.client_id}, ${serviceId}, ${sql.array(scopes, "text")}, ${p.redirect_uri},
+              ${p.code_challenge}, ${p.resource}, ${new Date(now().getTime() + CODE_TTL_MS)})`;
+    return code;
+  }
   const limited = (c: Context<Env>, limit: ReturnType<typeof createRateLimiter>) => {
     const ip = c.env?.ip;
     return ip ? !limit(rateLimitKey(ip)).ok : false;
@@ -166,6 +177,8 @@ export function oauthRoutes(deps: Deps) {
       scopes_supported: [...OAUTH_SCOPES],
       client_id_metadata_document_supported: true,
       authorization_response_iss_parameter_supported: true,
+      revocation_endpoint: `${publicOrigin}/oauth/revoke`,
+      revocation_endpoint_auth_methods_supported: ["none"],
     }),
   );
 
@@ -299,6 +312,21 @@ export function oauthRoutes(deps: Deps) {
     const scopes = OAUTH_SCOPES.filter((s) => asked.includes(s));
     if (scopes.length === 0) return fail("invalid_scope", `Grantable scopes: ${OAUTH_SCOPES.join(" ")}.`);
 
+    // A user who already granted this client these scopes is not asked again (like Google's
+    // "already approved"). The admin always chooses a service, so the admin always sees consent.
+    if (who && !who.admin) {
+      const serviceId = who.services[0]!.id;
+      const [held] = await sql`
+        select 1 from oauth_grants
+        where client_id = ${clientId} and service_id = ${serviceId} and revoked_at is null
+          and refresh_expires_at > ${now()} and scopes @> ${sql.array(scopes, "text")}
+        limit 1`;
+      if (held) {
+        const code = await issueCode({ client_id: clientId, redirect_uri: redirectUri, code_challenge: q.code_challenge!, resource }, serviceId, scopes);
+        return c.redirect(withParams(redirectUri, { code, state: q.state, iss: publicOrigin }), 302);
+      }
+    }
+
     const [pending]: Pending[] = await sql`
       insert into oauth_pending (id, client_id, redirect_uri, state, code_challenge, scopes, resource, expires_at)
       values (${crypto.randomUUID()}, ${clientId}, ${redirectUri}, ${q.state ?? null}, ${q.code_challenge!},
@@ -331,14 +359,26 @@ export function oauthRoutes(deps: Deps) {
     const scopesOk = granted.length > 0 && granted.every((s) => pending.scopes.includes(s));
     if (!service || !scopesOk) return errorPage(c, "Оберіть сервіс і хоча б один із запропонованих дозволів.");
 
-    const code = random();
     const [deleted] = await sql`delete from oauth_pending where id = ${pending.id} returning id`;
     if (!deleted) return errorPage(c, "На цей запит уже відповіли.");
-    await sql`
-      insert into oauth_codes (code_hash, client_id, service_id, scopes, redirect_uri, code_challenge, resource, expires_at)
-      values (${sha256(code)}, ${pending.client_id}, ${service.id}, ${sql.array(granted, "text")}, ${pending.redirect_uri},
-              ${pending.code_challenge}, ${pending.resource}, ${new Date(now().getTime() + CODE_TTL_MS)})`;
-    return back({ code });
+    return back({ code: await issueCode(pending, service.id, granted) });
+  });
+
+  // RFC 7009: either token of a grant ends the whole grant. The answer is 200 whether or not the
+  // token was known, so it reveals nothing; only the client the grant belongs to can revoke it.
+  app.post("/oauth/revoke", async (c) => {
+    if (limited(c, limitToken)) return c.json({ error: "slow_down" }, 429);
+    const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
+    const token = typeof form.token === "string" ? form.token : "";
+    const clientId = typeof form.client_id === "string" ? form.client_id : "";
+    if (token && clientId) {
+      const hash = sha256(token);
+      await sql`
+        update oauth_grants set revoked_at = ${now()}
+        where client_id = ${clientId} and revoked_at is null and (access_hash = ${hash} or refresh_hash = ${hash})`;
+    }
+    c.header("Cache-Control", "no-store");
+    return c.body(null, 200);
   });
 
   app.post("/oauth/token", async (c) => {
