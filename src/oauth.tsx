@@ -328,7 +328,8 @@ export function oauthRoutes(deps: Deps) {
       const [held] = await sql`
         select 1 from oauth_grants g
         where g.client_id = ${clientId} and g.service_id = ${serviceId} and g.revoked_at is null
-          and g.refresh_expires_at > ${now()} and g.scopes @> ${sql.array(scopes, "text")}
+          and g.refresh_expires_at > ${now()} and g.created_at > ${new Date(now().getTime() - GRANT_MAX_MS)}
+          and g.scopes @> ${sql.array(scopes, "text")}
           and exists (select 1 from oauth_codes k where k.client_id = g.client_id and k.service_id = g.service_id
                       and k.redirect_uri = ${redirectUri} and k.used_at is not null)
         limit 1`;

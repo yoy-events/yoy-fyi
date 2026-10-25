@@ -1093,6 +1093,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
                  group by tool order by last desc limit 5) t) as tools
       from oauth_grants g left join oauth_clients cl on cl.client_id = g.client_id
       where g.service_id = ${u.serviceId} and g.revoked_at is null and g.refresh_expires_at > ${now()}
+        and g.created_at > ${new Date(now().getTime() - 90 * DAY)}
       order by g.created_at desc`;
     const when = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") : "ніколи");
     return c.html(

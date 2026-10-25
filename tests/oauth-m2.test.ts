@@ -187,6 +187,14 @@ describe("remembered consent", () => {
     expect(res.status).toBe(200);
   });
 
+  test("a connection past its 90 days is not remembered, even with a refresh token still in date", async () => {
+    const { refresh_token } = await connect(["links:read"]);
+    now = new Date(now.getTime() + 50 * 86_400_000);
+    await post("/oauth/token", { grant_type: "refresh_token", refresh_token, client_id: CLIENT }, "");
+    now = new Date(now.getTime() + 41 * 86_400_000);
+    expect((await get(`/oauth/authorize?${authorizeQuery("links:read")}`)).status).toBe(200);
+  });
+
   test("after the grant is revoked, consent is asked again", async () => {
     const tokens = await connect(["links:read"]);
     await post("/oauth/revoke", { token: tokens.refresh_token, client_id: CLIENT }, "");
