@@ -31,6 +31,8 @@ const PENDING_TTL_MS = 10 * 60_000;
 const CODE_TTL_MS = 60_000;
 const ACCESS_TTL_MS = 3_600_000;
 const REFRESH_TTL_MS = 60 * 86_400_000;
+// However often it is refreshed, a connection ends this long after the user approved it.
+const GRANT_MAX_MS = 90 * 86_400_000;
 const CLIENT_CACHE_MS = 86_400_000;
 const METADATA_MAX_BYTES = 64 * 1024;
 
@@ -206,18 +208,24 @@ export function oauthRoutes(deps: Deps) {
       400,
     );
 
-  async function consentPage(c: Context, pending: Pending, who: { services: { id: string; slug: string }[]; label: string }) {
+  async function consentPage(c: Context, pending: Pending, who: Approver) {
     const client = await loadClient(pending.client_id);
     if (!client) return errorPage(c, "Не вдалося визначити застосунок.");
     const { services } = who;
     const host = new URL(pending.redirect_uri).host;
     return c.html(
-      <Layout title="Підключити застосунок" signedIn>
+      <Layout title="Підключити застосунок" signedIn={who.admin}>
         <h1>Підключити {client.name}</h1>
         <p>
           {client.name} просить доступ до yoy.fyi для одного сервісу. Після рішення ви повернетеся на <strong>{host}</strong>.
         </p>
         <p class="meta">Ви ввійшли як {who.label}.</p>
+        {isLoopback(new URL(pending.redirect_uri)) && (
+          <p class="notice">
+            Після рішення вас поверне на адресу localhost, тобто на програму на цьому комп'ютері. Дозволяйте, лише якщо ви саме зараз підключаєте
+            програму на цьому комп'ютері: будь-яка програма тут може назватися {client.name}.
+          </p>
+        )}
         {services.length === 0 ? (
           <p class="notice">Спершу створіть сервіс: випустіть для нього API-ключ в адмінці.</p>
         ) : (
@@ -312,14 +320,17 @@ export function oauthRoutes(deps: Deps) {
     const scopes = OAUTH_SCOPES.filter((s) => asked.includes(s));
     if (scopes.length === 0) return fail("invalid_scope", `Grantable scopes: ${OAUTH_SCOPES.join(" ")}.`);
 
-    // A user who already granted this client these scopes is not asked again (like Google's
-    // "already approved"). The admin always chooses a service, so the admin always sees consent.
-    if (who && !who.admin) {
+    // A user who already granted this client these scopes, for this exact https redirect, is not
+    // asked again (like Google's "already approved"). Never for loopback redirects: any program on
+    // the computer can claim a client's name there. The admin picks a service, so always sees consent.
+    if (who && !who.admin && !isLoopback(new URL(redirectUri))) {
       const serviceId = who.services[0]!.id;
       const [held] = await sql`
-        select 1 from oauth_grants
-        where client_id = ${clientId} and service_id = ${serviceId} and revoked_at is null
-          and refresh_expires_at > ${now()} and scopes @> ${sql.array(scopes, "text")}
+        select 1 from oauth_grants g
+        where g.client_id = ${clientId} and g.service_id = ${serviceId} and g.revoked_at is null
+          and g.refresh_expires_at > ${now()} and g.scopes @> ${sql.array(scopes, "text")}
+          and exists (select 1 from oauth_codes k where k.client_id = g.client_id and k.service_id = g.service_id
+                      and k.redirect_uri = ${redirectUri} and k.used_at is not null)
         limit 1`;
       if (held) {
         const code = await issueCode({ client_id: clientId, redirect_uri: redirectUri, code_challenge: q.code_challenge!, resource }, serviceId, scopes);
@@ -413,9 +424,9 @@ export function oauthRoutes(deps: Deps) {
         }
         const tokens = fresh();
         await sql`
-          insert into oauth_grants (id, client_id, service_id, scopes, access_hash, access_expires_at, refresh_hash, refresh_expires_at)
+          insert into oauth_grants (id, client_id, service_id, scopes, access_hash, access_expires_at, refresh_hash, refresh_expires_at, created_at)
           values (${Bun.randomUUIDv7()}, ${clientId}, ${row.service_id}, ${sql.array(row.scopes, "text")}, ${sha256(tokens.access)},
-                  ${new Date(at.getTime() + ACCESS_TTL_MS)}, ${sha256(tokens.refresh)}, ${new Date(at.getTime() + REFRESH_TTL_MS)})`;
+                  ${new Date(at.getTime() + ACCESS_TTL_MS)}, ${sha256(tokens.refresh)}, ${new Date(at.getTime() + REFRESH_TTL_MS)}, ${at})`;
         return issue(row, tokens);
       }
       case "refresh_token": {
@@ -432,6 +443,7 @@ export function oauthRoutes(deps: Deps) {
               prev_refresh_hash = refresh_hash, refresh_hash = ${sha256(tokens.refresh)},
               refresh_expires_at = ${new Date(at.getTime() + REFRESH_TTL_MS)}
           where refresh_hash = ${hash} and client_id = ${clientId} and revoked_at is null and refresh_expires_at > ${at}
+            and created_at > ${new Date(at.getTime() - GRANT_MAX_MS)}
           returning scopes`;
         if (!grant) return err("invalid_grant", "The refresh token is invalid, expired or revoked.");
         return issue(grant, tokens);

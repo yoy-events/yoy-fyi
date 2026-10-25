@@ -16,6 +16,7 @@ let sql: SQL;
 let app: ReturnType<typeof createApp>;
 let claims: Record<string, unknown>;
 let cookie: string;
+let now: Date;
 
 const metadata: Record<string, ClientMetadata> = {
   [CLIENT]: { client_id: CLIENT, client_name: "Claude", redirect_uris: [REDIRECT] },
@@ -86,8 +87,10 @@ beforeAll(async () => {
 beforeEach(async () => {
   await reset(sql);
   const mail = testAdmin();
+  now = new Date();
   app = createApp({
     sql,
+    now: () => now,
     publicOrigin: ORIGIN,
     countryOf: () => null,
     resolveHost: async () => ["93.184.215.14"],
@@ -168,9 +171,79 @@ describe("remembered consent", () => {
     expect(await pendingFrom(res)).toBeDefined();
   });
 
+  test("a loopback redirect always shows consent, even for a client already approved", async () => {
+    metadata[CLIENT] = { ...metadata[CLIENT]!, redirect_uris: [REDIRECT, "http://localhost/callback"] };
+    await connect(["links:read"]);
+    const res = await get(`/oauth/authorize?${authorizeQuery("links:read", CLIENT, "http://localhost:4567/callback")}`);
+    metadata[CLIENT] = { client_id: CLIENT, client_name: "Claude", redirect_uris: [REDIRECT] };
+    expect(res.status).toBe(200);
+  });
+
+  test("another declared redirect of the same client shows consent", async () => {
+    metadata[CLIENT] = { ...metadata[CLIENT]!, redirect_uris: [REDIRECT, "https://claude.ai/other_callback"] };
+    await connect(["links:read"]);
+    const res = await get(`/oauth/authorize?${authorizeQuery("links:read", CLIENT, "https://claude.ai/other_callback")}`);
+    metadata[CLIENT] = { client_id: CLIENT, client_name: "Claude", redirect_uris: [REDIRECT] };
+    expect(res.status).toBe(200);
+  });
+
   test("after the grant is revoked, consent is asked again", async () => {
     const tokens = await connect(["links:read"]);
     await post("/oauth/revoke", { token: tokens.refresh_token, client_id: CLIENT }, "");
     expect((await get(`/oauth/authorize?${authorizeQuery("links:read")}`)).status).toBe(200);
+  });
+});
+
+describe("connections page for users", () => {
+  test("shows each connection's calls in the last 30 days and its latest tools", async () => {
+    const { access_token } = await connect(["links:read"]);
+    await mcp(access_token, "list_links");
+    await mcp(access_token, "whoami");
+    const html = await (await get("/account/apps")).text();
+    expect(html).toContain("викликів за 30 днів: 2");
+    expect(html).toMatch(/останні: (whoami, list_links|list_links, whoami)/);
+  });
+
+  test("Disconnect all revokes every connection of the account", async () => {
+    const a = await connect(["links:read"]);
+    const res = await post("/account/apps/revoke-all", {});
+    expect(res.status).toBe(303);
+    expect((await mcp(a.access_token, "whoami")).status).toBe(401);
+    expect(await sql`select 1 from oauth_grants where revoked_at is null`).toHaveLength(0);
+  });
+
+  test("Disconnect all needs a session and our own Origin", async () => {
+    expect((await post("/account/apps/revoke-all", {}, "")).status).toBe(401);
+  });
+});
+
+describe("token lifetime", () => {
+  test("a refresh token stops working 90 days after the connection was made, however often it was used", async () => {
+    const first = await connect(["links:read"]);
+    const refresh = (token: string) => post("/oauth/token", { grant_type: "refresh_token", refresh_token: token, client_id: CLIENT }, "");
+    now = new Date(now.getTime() + 50 * 86_400_000);
+    const second = await refresh(first.refresh_token);
+    expect(second.status).toBe(200);
+    // 50 days after the last refresh, inside its 60-day window, but 100 days after connecting.
+    now = new Date(now.getTime() + 50 * 86_400_000);
+    expect((await refresh((await second.json()).refresh_token)).status).toBe(400);
+  });
+;
+});
+
+describe("loopback redirects", () => {
+  test("the consent page warns when the app returns to this computer", async () => {
+    metadata[CLIENT] = { ...metadata[CLIENT]!, redirect_uris: [REDIRECT, "http://localhost/callback"] };
+    const html = await (await get(`/oauth/authorize?${authorizeQuery("links:read", CLIENT, "http://localhost:4567/callback")}`)).text();
+    expect(html).toContain("localhost");
+    expect(html).toContain("на цьому комп&#39;ютері");
+    metadata[CLIENT] = { client_id: CLIENT, client_name: "Claude", redirect_uris: [REDIRECT] };
+  });
+
+  test("a normal https redirect has no such warning", async () => {
+    const html = await (await get(`/oauth/authorize?${authorizeQuery("links:read")}`)).text();
+    expect(html).not.toContain("на цьому комп&#39;ютері");
+    // A user is not shown the admin's navigation.
+    expect(html).not.toContain('href="/admin/users"');
   });
 });

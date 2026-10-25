@@ -122,4 +122,6 @@ The CI smoke step checks that an unauthenticated `POST /mcp` answers with the `W
 
 - `POST /oauth/revoke` (RFC 7009, public clients): either token of a grant revokes the whole grant, only for the grant's own `client_id`; the answer is always 200.
 - A tool call whose scope the OAuth grant lacks answers HTTP 403 with `WWW-Authenticate: Bearer error="insufficient_scope", scope="…"` (the held scopes plus the missing one), so the client can ask the user again. API keys keep the plain tool error, since they cannot be stepped up.
-- A signed-in user who already holds an active grant for the same client with all the requested scopes gets a code without the consent page. The admin always sees consent, because the admin picks a service each time.
+- A signed-in user who already holds an active grant for the same client with all the requested scopes, and already approved this exact https redirect URI, gets a code without the consent page. Loopback redirects always show consent, since any program on the computer can claim a client's name there. The admin always sees consent, because the admin picks a service each time.
+- Refresh tokens rotate within 60 days, and a connection ends 90 days after it was approved however often it is refreshed.
+- The consent page warns when the redirect goes to localhost. `/account/apps` shows each connection's calls in the last 30 days and its latest tools, and has Disconnect all.
