@@ -18,16 +18,19 @@ const luminance = (hex: string) => {
 
 // Reads fg, bg and caption from a query. Scanners need dark modules on a light background with
 // clear contrast, so other combinations are refused.
-export function qrOptions(query: URLSearchParams): QrStyle | { error: string } {
+// What is wrong with a style; the pages and tools word it in their own language.
+export type QrError = "fg" | "bg" | "contrast" | "caption";
+
+export function qrOptions(query: URLSearchParams): QrStyle | { error: QrError } {
   const fg = (query.get("fg") || "#000000").toLowerCase();
   const bg = (query.get("bg") || "#ffffff").toLowerCase();
   const caption = (query.get("caption") ?? "").trim() || null;
-  if (!HEX.test(fg)) return { error: "Колір коду (fg) має бути на кшталт #1a2b3c" };
-  if (!HEX.test(bg)) return { error: "Колір фону (bg) має бути на кшталт #ffffff" };
+  if (!HEX.test(fg)) return { error: "fg" };
+  if (!HEX.test(bg)) return { error: "bg" };
   if (luminance(fg) >= luminance(bg) || (luminance(bg) + 0.05) / (luminance(fg) + 0.05) < 3) {
-    return { error: "Замалий контраст (contrast): потрібен темний код на світлому фоні" };
+    return { error: "contrast" };
   }
-  if (caption && caption.length > MAX_CAPTION) return { error: `Підпис (caption) — не більше ${MAX_CAPTION} символів` };
+  if (caption && caption.length > MAX_CAPTION) return { error: "caption" };
   return { fg, bg, caption };
 }
 

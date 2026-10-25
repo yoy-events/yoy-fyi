@@ -5,7 +5,8 @@ import type { SQL } from "bun";
 import type { Context } from "hono";
 import { type Caller, authenticate } from "./keys";
 import { OAUTH_SCOPES, authenticateOAuth } from "./oauth";
-import { getBio, saveBio } from "./bio";
+import { bioErrorText, getBio, saveBio } from "./bio";
+import { MESSAGES } from "./messages";
 import { qrOptions, qrPng } from "./qr";
 import { type RateLimit, createRateLimiter } from "./ratelimit";
 
@@ -307,7 +308,7 @@ const TOOLS: Tool[] = [
       if (!id(args)) return toolError("validation_failed: id is required.");
       if (args.caption !== undefined) return toolError("validation_failed: a caption is available only in the SVG on the link's page at yoy.fyi.");
       const style = qrOptions(new URLSearchParams(pick(args, ["fg", "bg"]) as Record<string, string>));
-      if ("error" in style) return toolError(`validation_failed: ${style.error}`);
+      if ("error" in style) return toolError(`validation_failed: ${style.error === "caption" ? MESSAGES.en.qr.caption(40) : MESSAGES.en.qr[style.error]}`);
       const link = await api("GET", `/links/${id(args)}`);
       if (link.isError) return link;
       const shortUrl = String(link.structuredContent!.short_url);
@@ -397,7 +398,7 @@ const TOOLS: Tool[] = [
         { userId, serviceId, publicOrigin: publicOrigin, now: new Date() },
         { handle: text(args.handle), title: text(args.title), description: text(args.description), link: ((args.link_ids as unknown[]) ?? []).map(String) },
       );
-      if ("errors" in saved) return toolError(`validation_failed: ${saved.errors.join(" ")}`);
+      if ("errors" in saved) return toolError(`validation_failed: ${saved.errors.map((e) => bioErrorText(e, "en")).join(" ")}`);
       return ok({ page: { ...saved.page, url: `${publicOrigin}/@${saved.page.handle}` } });
     },
   },
