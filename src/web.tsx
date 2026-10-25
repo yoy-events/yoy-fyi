@@ -18,6 +18,7 @@ import { type QrStyle, qrOptions, qrPng, qrSvg } from "./qr";
 import { createRateLimiter } from "./ratelimit";
 import type { UnsafeUrls } from "./safe-browsing";
 import { checkTarget } from "./target-policy";
+import { clientLabel } from "./oauth";
 import { issueConnectToken } from "./telegram";
 import { REASON_UK } from "./uk";
 import { HANDLE, saveBio } from "./bio";
@@ -1087,8 +1088,8 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   app.get("/account/apps", async (c) => {
     const u = c.get("user");
     // Calls are logged per client and account, so a client's calls show on each of its connections.
-    const grants: { id: string; client: string; scopes: string[]; created_at: Date; last_used_at: Date | null; calls: number; tools: string[] | null }[] = await sql`
-      select g.id, coalesce(cl.name, g.client_id) as client, g.scopes, g.created_at, g.last_used_at,
+    const grants: { id: string; client_id: string; client: string | null; scopes: string[]; created_at: Date; last_used_at: Date | null; calls: number; tools: string[] | null }[] = await sql`
+      select g.id, g.client_id, cl.name as client, g.scopes, g.created_at, g.last_used_at,
              (select count(*) from mcp_calls m where m.service_id = g.service_id and m.client = g.client_id
                 and m.at >= ${new Date(now().getTime() - 30 * DAY)})::int as calls,
              (select array_agg(tool order by last desc) from
@@ -1117,7 +1118,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           <ul class="list">
             {grants.map((g) => (
               <li>
-                <strong>{g.client}</strong>
+                <strong>{clientLabel(g.client_id, g.client)}</strong>
                 <span class="meta">
                   {g.scopes.join(", ")} · підключено {when(g.created_at)} · останнє використання {when(g.last_used_at)}
                 </span>

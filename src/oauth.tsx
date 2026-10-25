@@ -43,6 +43,17 @@ const CHALLENGE = /^[A-Za-z0-9_-]{43,128}$/;
 const ACCESS = /^Bearer (yfo_[A-Za-z0-9_-]{43})$/;
 
 const hostAllowed = (host: string) => CLIENT_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+
+// How a client is named wherever people see it: a self-asserted name is never shown bare.
+export function clientLabel(clientId: string, name: string | null): string {
+  if (clientId.startsWith("dcr_")) return `${name ?? "Невідомий застосунок"} (зареєструвався сам, не перевірено)`;
+  try {
+    const host = new URL(clientId).hostname;
+    return hostAllowed(host) ? (name ?? host) : `${name ?? host} (${host}, не перевірено)`;
+  } catch {
+    return name ?? clientId;
+  }
+}
 const isLoopback = (u: URL) => u.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
 
 // Exact match, except that loopback redirects match on any port (RFC 8252).
@@ -148,6 +159,7 @@ export function oauthRoutes(deps: Deps) {
   const { sql, publicOrigin, now } = deps;
   const resource = `${publicOrigin}/mcp`;
   const app = new Hono<Env>();
+  const limitUnknownFetch = createRateLimiter({ perMinute: 30 / 60, burst: 30 });
   const limitAuthorize = createRateLimiter(deps.authorizeLimit ?? { perMinute: 30, burst: 30 });
   const limitToken = createRateLimiter(deps.tokenLimit ?? { perMinute: 20, burst: 20 });
   // Who is approving: the admin (any service) or a user (their own service only). Admin wins.
@@ -221,6 +233,9 @@ export function oauthRoutes(deps: Deps) {
     if (cached && now().getTime() - new Date(cached.fetched_at).getTime() < CLIENT_CACHE_MS) {
       return { name: cached.name, redirect_uris: cached.redirect_uris, ...known };
     }
+    // Documents on unknown hosts are fetched at most a few dozen times an hour in total, so the
+    // authorize page can't be used to make yoy.fyi send many requests to arbitrary hosts.
+    if (!known.verified && !limitUnknownFetch("unknown-client-host").ok) return null;
     const doc = await deps.clientMetadata(clientId);
     const uris = doc?.redirect_uris;
     if (!doc || doc.client_id !== clientId || !Array.isArray(uris) || !uris.every((u) => typeof u === "string")) return null;
@@ -246,7 +261,10 @@ export function oauthRoutes(deps: Deps) {
     const client = await loadClient(pending.client_id);
     if (!client) return errorPage(c, "Не вдалося визначити застосунок.");
     const { services } = who;
-    const host = new URL(pending.redirect_uri).host || pending.redirect_uri.split(":")[0];
+    const back = new URL(pending.redirect_uri);
+    const web = back.protocol === "https:" || back.protocol === "http:";
+    // A private-use scheme opens an app on this device; show it whole so it can't pass for a website.
+    const host = web ? back.host : `${back.protocol}//${back.host}`;
     return c.html(
       <Layout title="Підключити застосунок" signedIn={who.admin}>
         <h1>Підключити {client.name}</h1>
@@ -261,9 +279,9 @@ export function oauthRoutes(deps: Deps) {
             указав сам. Дозволяйте, лише якщо ви щойно самі підключали yoy.fyi у цьому застосунку.
           </p>
         )}
-        {isLoopback(new URL(pending.redirect_uri)) && (
+        {(!web || isLoopback(back)) && (
           <p class="notice">
-            Після рішення вас поверне на адресу localhost, тобто на програму на цьому комп'ютері. Дозволяйте, лише якщо ви саме зараз підключаєте
+            Після рішення вас поверне не на сайт, а в програму на цьому пристрої ({host}). Дозволяйте, лише якщо ви саме зараз підключаєте
             програму на цьому комп'ютері: будь-яка програма тут може назватися {client.name}.
           </p>
         )}
