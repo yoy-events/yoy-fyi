@@ -4,6 +4,7 @@ import type { SQL } from "bun";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { csrf } from "hono/csrf";
+import { raw } from "hono/html";
 import type { Child } from "hono/jsx";
 import { type AdminConfig, startGoogle } from "./admin/auth";
 import { BarChart, Ranking } from "./admin/charts";
@@ -83,8 +84,18 @@ function Page({
   user,
   og,
   bot,
+  jsonLd,
+  canonical,
   children,
-}: { title: string; user?: User | null; og?: { title: string; description?: string }; bot?: string; children: Child }) {
+}: {
+  title: string;
+  user?: User | null;
+  og?: { title: string; description?: string };
+  bot?: string;
+  jsonLd?: object;
+  canonical?: string;
+  children: Child;
+}) {
   return (
     <html lang="uk">
       <head>
@@ -94,6 +105,9 @@ function Page({
         <link rel="stylesheet" href="/static/admin.css" />
         {og && <meta property="og:title" content={og.title} />}
         {og?.description && <meta property="og:description" content={og.description} />}
+        {og?.description && <meta name="description" content={og.description} />}
+        {canonical && <link rel="canonical" href={canonical} />}
+        {jsonLd && <script type="application/ld+json">{raw(JSON.stringify(jsonLd).replace(/</g, "\\u003c"))}</script>}
         <script src="/static/copy.js" defer></script>
       </head>
       <body>
@@ -121,6 +135,30 @@ function Page({
     </html>
   );
 }
+
+const FAQ: [string, string][] = [
+  ["Це безкоштовно?", "Так. Потрібен лише Google-акаунт для входу."],
+  [
+    "Чи можна створити коротке посилання через ChatGPT або Claude?",
+    "Так. Підключіть yoy.fyi як конектор за адресою https://yoy.fyi/mcp, і асистент створюватиме справжні короткі посилання й QR-коди замість вигаданих адрес.",
+  ],
+  ["Скільки живе коротке посилання?", "Поки ви його не вимкнете або поки не мине термін дії, якщо ви його задали. Код вимкненого посилання не отримає ніхто інший."],
+  ["Що зберігається про людей, які клікають?", "Час, сайт-джерело, UTM-мітки, браузер, пристрій і країна. IP-адреса не зберігається."],
+];
+
+const TOOL_DOCS: [string, string][] = [
+  ["create_link", "створює коротке посилання"],
+  ["create_links", "створює до 20 посилань за раз"],
+  ["list_links", "шукає посилання за текстом і тегом"],
+  ["get_link", "показує одне посилання"],
+  ["update_link", "змінює адресу, назву, теги, прев'ю чи термін дії"],
+  ["disable_link", "вимикає посилання"],
+  ["get_qr", "повертає QR-код картинкою"],
+  ["get_click_timeseries", "кліки за годинами чи днями"],
+  ["get_click_breakdown", "кліки за джерелом, UTM, країною, пристроєм"],
+  ["get_bio, update_bio", "сторінка link-in-bio yoy.fyi/@назва"],
+  ["whoami", "до якого акаунта підключено"],
+];
 
 // Channel variants of a short link: the redirect passes these query parameters on to the target
 // and records them on the click (see buildTarget), so no extra link is needed.
@@ -328,10 +366,34 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   app.get("/", async (c) => {
     const u = await user(c);
     if (u) return home(c, u);
+    const description =
+      "Безкоштовні короткі посилання й QR-коди зі статистикою кліків. Працює на сайті, через API і прямо з ChatGPT чи Claude.";
     return c.html(
-      <Page title="yoy.fyi">
+      <Page
+        title="yoy.fyi"
+        og={{ title: "yoy.fyi: короткі посилання й QR-коди", description }}
+        canonical={`${publicOrigin}/`}
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "WebApplication",
+              name: "yoy.fyi",
+              url: `${publicOrigin}/`,
+              applicationCategory: "BusinessApplication",
+              operatingSystem: "Any",
+              description,
+              offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+            },
+            {
+              "@type": "FAQPage",
+              mainEntity: FAQ.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),
+            },
+          ],
+        }}
+      >
         <h1>Короткі посилання та QR-коди</h1>
-        <p>Перетворюйте довгі посилання на короткі yoy.fyi, завантажуйте QR-код для кожного й дивіться, хто клікає: за днями, джерелами, країнами та пристроями.</p>
+        <p>{description}</p>
         {admin.google ? (
           <a class="button" href="/login/google">
             Увійти через Google
@@ -339,9 +401,93 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         ) : (
           <p class="meta">Вхід зараз недоступний.</p>
         )}
+        <h2>Що вміє</h2>
+        <ul>
+          <li>Коротке посилання yoy.fyi з власним кодом або випадковим, з назвою й тегами.</li>
+          <li>QR-код для кожного посилання: PNG 1024 пікселі або SVG, свої кольори й підпис під кодом.</li>
+          <li>Статистика кліків за днями, джерелами, UTM-мітками, країнами й пристроями.</li>
+          <li>Готові варіанти посилання для Telegram, Instagram, Facebook і розсилки.</li>
+          <li>Власне прев'ю, яке показують Telegram і Facebook, коли посилання надсилають у чат.</li>
+          <li>Імпорт і експорт у CSV, сторінка link-in-bio на yoy.fyi/@ваша-назва.</li>
+        </ul>
+        <h2>З ChatGPT і Claude</h2>
+        <p>
+          Додайте <code>{publicOrigin}/mcp</code> як конектор у claude.ai чи ChatGPT і ввійдіть через Google. Тоді асистент створює справжні короткі
+          посилання й QR-коди та відповідає, скільки було кліків. <a href="/docs/mcp">Покрокова інструкція</a>.
+        </p>
+        <h2>Питання</h2>
+        {FAQ.map(([q, a]) => (
+          <>
+            <h3>{q}</h3>
+            <p>{a}</p>
+          </>
+        ))}
+        <p>
+          <a href="/blog/uk">Блог</a> · <a href="/docs/mcp">Підключення до AI</a> · <a href="/v1/openapi.json">API</a>
+        </p>
       </Page>,
     );
   });
+
+  // How to connect yoy.fyi to AI assistants; also what an assistant reads to explain it.
+  app.get("/docs/mcp", async (c) =>
+    c.html(
+      <Page
+        title="Підключення yoy.fyi до ChatGPT, Claude та інших"
+        user={await user(c)}
+        bot={telegramBot}
+        og={{ title: "Підключення yoy.fyi до ChatGPT, Claude та інших", description: "Покрокові інструкції для claude.ai, ChatGPT, Claude Code і Cursor." }}
+        canonical={`${publicOrigin}/docs/mcp`}
+      >
+        <h1>Підключення yoy.fyi до AI-асистентів</h1>
+        <p>
+          yoy.fyi має MCP-сервер за адресою <code>{publicOrigin}/mcp</code>. Через нього асистент створює короткі посилання, показує QR-коди й
+          статистику кліків. Посилання справжні й працюють одразу.
+        </p>
+        <h2>claude.ai</h2>
+        <ol>
+          <li>Налаштування, розділ Connectors, Add custom connector.</li>
+          <li>
+            Адреса: <code>{publicOrigin}/mcp</code>, далі Connect.
+          </li>
+          <li>Увійдіть через Google і на сторінці дозволів поставте галочку для створення посилань, якщо хочете, щоб Claude їх створював.</li>
+          <li>У чаті ввімкніть yoy.fyi через кнопку «+».</li>
+        </ol>
+        <h2>ChatGPT</h2>
+        <ol>
+          <li>Settings, Apps & Connectors, Advanced, увімкніть Developer mode.</li>
+          <li>
+            Створіть конектор з адресою <code>{publicOrigin}/mcp</code>.
+          </li>
+          <li>Увійдіть через Google і дозвольте доступ. Доступність режиму залежить від тарифу ChatGPT.</li>
+        </ol>
+        <h2>Claude Code, Cursor та інші програми</h2>
+        <p>
+          Створіть API-ключ на сторінці <a href="/account/keys">API-ключі</a> і передайте його в заголовку. Для Claude Code:
+        </p>
+        <pre>
+          <code>{`claude mcp add --transport http yoy-fyi ${publicOrigin}/mcp --header "Authorization: Bearer yfi_..."`}</code>
+        </pre>
+        <p>Для Cursor, у файлі mcp.json:</p>
+        <pre>
+          <code>{JSON.stringify({ mcpServers: { "yoy-fyi": { url: `${publicOrigin}/mcp`, headers: { Authorization: "Bearer yfi_..." } } } }, null, 2)}</code>
+        </pre>
+        <h2>Інструменти</h2>
+        <ul>
+          {TOOL_DOCS.map(([name, text]) => (
+            <li>
+              <code>{name}</code>: {text}
+            </li>
+          ))}
+        </ul>
+        <h2>Безпека</h2>
+        <p>
+          Асистент бачить лише ваші посилання й лише з тими дозволами, які ви дали. Усі підключення видно на сторінці{" "}
+          <a href="/account/apps">Підключені застосунки</a>, там їх можна відкликати.
+        </p>
+      </Page>,
+    ),
+  );
 
   // `pending` is an OAuth authorize request (an app connecting) to return to after signing in.
   app.get("/login/google", (c) => {
