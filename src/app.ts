@@ -14,6 +14,7 @@ import { type TelegramConfig, telegramRoutes } from "./telegram";
 import { webRoutes } from "./web";
 import { type FetchClientMetadata, fetchClientMetadata, oauthRoutes } from "./oauth";
 import type { UnsafeUrls } from "./safe-browsing";
+import { countPageViews } from "./page-views";
 import { createSaltSource, visitorHash } from "./salt";
 import { buildTarget } from "./target";
 import { webhookRoutes } from "./webhooks";
@@ -100,6 +101,7 @@ export function createApp({
     if (url.host === legacyHost) return c.redirect(publicOrigin + url.pathname + url.search, 301);
     await next();
   });
+  app.use(countPageViews(sql, publicOrigin, now));
   const saltFor = createSaltSource(sql);
   const record = recordClick ?? ((click: Click) => insertClick(sql, click));
   const limitRedirect = createRateLimiter(redirectLimit);

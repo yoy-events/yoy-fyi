@@ -31,6 +31,13 @@ export function aiRoutes(sql: SQL, now: () => Date) {
   app.get("/ai", async (c) => {
     const to = new Date(Math.floor(now().getTime() / DAY) * DAY + DAY);
     const from = new Date(to.getTime() - 30 * DAY);
+    const [pagesBySource, aiPageReferrers, crawlers, topPages]: Count[][] = await Promise.all([
+      sql`select source as value, count(*)::int as clicks from page_views where at >= ${from} and bot_name is null group by 1 order by 2 desc`,
+      sql`select referer_host as value, count(*)::int as clicks from page_views
+          where at >= ${from} and bot_name is null and source = 'ai_chat' group by 1 order by 2 desc limit 10`,
+      sql`select bot_name as value, count(*)::int as clicks from page_views where at >= ${from} and bot_name is not null group by 1 order by 2 desc limit 15`,
+      sql`select path as value, count(*)::int as clicks from page_views where at >= ${from} and bot_name is null group by 1 order by 2 desc limit 10`,
+    ]);
     const [daily, byClient, byTool, [totals], linksByClient, aiClicks]: [
       { t: Date; clicks: number }[],
       Count[],
@@ -81,6 +88,14 @@ export function aiRoutes(sql: SQL, now: () => Date) {
           <Ranking title="Calls by tool" items={byTool} total={sum(byTool)} />
           <Ranking title="Links created by client" items={linksByClient} total={sum(linksByClient)} />
           <Ranking title="Clicks from AI chats" items={aiClicks} total={sum(aiClicks)} />
+        </div>
+        <h2>Visits to the site</h2>
+        <p class="meta">Home, blog, docs, bio pages and crawler files. People and crawlers are counted apart.</p>
+        <div class="rankings">
+          <Ranking title="People by source" items={pagesBySource} total={sum(pagesBySource)} />
+          <Ranking title="People from AI chats" items={aiPageReferrers} total={sum(aiPageReferrers)} />
+          <Ranking title="Crawlers" items={crawlers} total={sum(crawlers)} />
+          <Ranking title="Top pages (people)" items={topPages} total={sum(topPages)} />
         </div>
       </Layout>,
     );
