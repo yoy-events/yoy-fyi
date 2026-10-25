@@ -23,6 +23,7 @@ every(sql, "partitions", 6 * 3600_000, async () => {
   await dropExpiredClicks(sql);
   // The MCP call log is kept as long as raw clicks (13 months).
   await sql`delete from mcp_calls where at < now() - interval '13 months'`;
+  await sql`delete from page_views where at < now() - interval '13 months'`;
 });
 every(sql, "rollup", 5 * 60_000, () => rollupRecent(sql));
 
