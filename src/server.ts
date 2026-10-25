@@ -21,6 +21,8 @@ await sql`select ensure_click_partitions(2)`;
 every(sql, "partitions", 6 * 3600_000, async () => {
   await sql`select ensure_click_partitions(2)`;
   await dropExpiredClicks(sql);
+  // The MCP call log is kept as long as raw clicks (13 months).
+  await sql`delete from mcp_calls where at < now() - interval '13 months'`;
 });
 every(sql, "rollup", 5 * 60_000, () => rollupRecent(sql));
 
@@ -56,6 +58,7 @@ const app = createApp({
   webhookKey,
   unsafeUrls,
   telegram,
+  indexable: config.indexable,
   admin: {
     email: config.adminEmail,
     sessionSecret: config.sessionSecret,

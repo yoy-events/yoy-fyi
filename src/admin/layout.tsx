@@ -16,6 +16,7 @@ export function Layout({ title, signedIn = false, children }: { title: string; s
           </a>
           {signedIn && <a href="/admin/users">Users</a>}
           {signedIn && <a href="/admin/apps">Connected apps</a>}
+          {signedIn && <a href="/admin/ai">AI usage</a>}
           {signedIn && (
             <form method="post" action="/admin/logout">
               <button type="submit" class="link">

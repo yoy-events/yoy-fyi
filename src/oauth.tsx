@@ -102,8 +102,8 @@ export async function authenticateOAuth(sql: SQL, header: string | undefined, no
     update oauth_grants set last_used_at = ${now}
     where access_hash = ${sha256(match[1]!)} and revoked_at is null and access_expires_at > ${now}
       and service_id in (select id from services where disabled_at is null)
-    returning id, service_id, scopes`;
-  return row ? { keyId: row.id, serviceId: row.service_id, scopes: row.scopes } : null;
+    returning id, service_id, scopes, client_id`;
+  return row ? { keyId: row.id, serviceId: row.service_id, scopes: row.scopes, client: row.client_id } : null;
 }
 
 type Deps = {

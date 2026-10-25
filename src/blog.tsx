@@ -93,7 +93,7 @@ function Shell(props: { lang: Lang; title: string; description: string; canonica
 
 const xml = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[ch]!);
 
-export function blogRoutes({ publicOrigin, posts }: { publicOrigin: string; posts: Post[] }) {
+export function blogRoutes({ publicOrigin, posts, indexable = true }: { publicOrigin: string; posts: Post[]; indexable?: boolean }) {
   const app = new Hono();
   const url = (path: string) => `${publicOrigin}${path}`;
   const indexAlternates = Object.fromEntries([...LANGS.map((l) => [l, url(`/blog/${l}`)]), ["x-default", url("/blog/en")]]);
@@ -189,7 +189,9 @@ export function blogRoutes({ publicOrigin, posts }: { publicOrigin: string; post
   // preview bot following one is how a shared link gets its card.
   app.get("/robots.txt", (c) =>
     c.text(
-      ["User-agent: *", "Allow: /", "Disallow: /admin", "Disallow: /account", "Disallow: /links", "Disallow: /oauth", "Disallow: /v1/", "", `Sitemap: ${url("/sitemap.xml")}`, ""].join("\n"),
+      indexable
+        ? ["User-agent: *", "Allow: /", "Disallow: /admin", "Disallow: /account", "Disallow: /links", "Disallow: /oauth", "Disallow: /v1/", "", `Sitemap: ${url("/sitemap.xml")}`, ""].join("\n")
+        : "User-agent: *\nDisallow: /\n",
       200,
       cache,
     ),
