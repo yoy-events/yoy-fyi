@@ -488,12 +488,16 @@ export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120
         const args = params?.arguments ?? {};
         if (!tool) return rpcError(c, 200, reqId, -32602, `Unknown tool: ${String(params?.name)}`);
         if (typeof args !== "object" || Array.isArray(args)) return rpcError(c, 200, reqId, -32602, "arguments must be an object");
-        // Step-up: an OAuth grant missing the tool's scope gets 403 insufficient_scope, so the client
-        // can ask the user for it. An API key cannot be stepped up and gets the tool's own error.
-        if (tool.scope && caller.client && !caller.scopes.includes(tool.scope as Caller["scopes"][number])) {
-          const wanted = OAUTH_SCOPES.filter((s) => s === tool.scope || caller.scopes.includes(s));
-          c.header("WWW-Authenticate", `Bearer error="insufficient_scope", scope="${wanted.join(" ")}", resource_metadata="${resourceMetadata}"`);
-          return rpcError(c, 403, reqId, -32001, `This connection lacks the ${tool.scope} permission. Reconnect yoy.fyi and allow it.`);
+        // Every tool checks its scope here, including the ones that don't go through /v1. An OAuth
+        // grant gets 403 insufficient_scope (step-up), so the client can ask the user for the scope;
+        // an API key cannot be stepped up and gets a tool error.
+        if (tool.scope && !caller.scopes.includes(tool.scope as Caller["scopes"][number])) {
+          if (caller.client) {
+            const wanted = OAUTH_SCOPES.filter((s) => s === tool.scope || caller.scopes.includes(s));
+            c.header("WWW-Authenticate", `Bearer error="insufficient_scope", scope="${wanted.join(" ")}", resource_metadata="${resourceMetadata}"`);
+            return rpcError(c, 403, reqId, -32001, `This connection lacks the ${tool.scope} permission. Reconnect yoy.fyi and allow it.`);
+          }
+          return ok(toolError(`forbidden: this key lacks the ${tool.scope} scope.`));
         }
         const started = performance.now();
         const result = await tool.run(args as Json, apiFor(caller), { ...caller, sql, publicOrigin });
