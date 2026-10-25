@@ -17,7 +17,7 @@ import type { UnsafeUrls } from "./safe-browsing";
 import { checkTarget } from "./target-policy";
 
 // System paths that can never be link codes, compared case-insensitively.
-const RESERVED = new Set(["v1", "admin", "health", "qr", "static", "openapi", "robots", "favicon", "mcp", "oauth", "links", "account", "login", "logout", "privacy", "terms", "telegram", "blog", "docs"]);
+const RESERVED = new Set(["v1", "admin", "health", "qr", "static", "openapi", "robots", "favicon", "mcp", "oauth", "links", "account", "login", "logout", "privacy", "terms", "telegram", "blog", "docs", "en", "es", "fr", "uk"]);
 const CODE = /^[A-Za-z0-9_-]{1,64}$/;
 const TAG = /^[a-z0-9][a-z0-9_:.-]{0,39}$/;
 const UTM_KEYS = new Set(["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]);
