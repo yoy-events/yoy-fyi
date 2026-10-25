@@ -53,6 +53,7 @@ export type Link = {
 export type LinkListQuery = {
   cursor?: string;
   limit?: number;
+  q?: string;
   tag?: Tag;
   code?: string;
   ext_service?: string;

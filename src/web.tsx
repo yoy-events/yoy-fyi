@@ -19,6 +19,7 @@ import type { UnsafeUrls } from "./safe-browsing";
 import { checkTarget } from "./target-policy";
 import { issueConnectToken } from "./telegram";
 import { REASON_UK } from "./uk";
+import { HANDLE, saveBio } from "./bio";
 import { type User, clearUserSession, currentUser } from "./users";
 
 const DAY = 86_400_000;
@@ -807,10 +808,6 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
 
   // Link-in-bio: one public page per user at /@handle with chosen short links, which count clicks
   // like any other visit to them.
-  const HANDLE = /^[a-z0-9][a-z0-9_.-]{2,29}$/;
-  const RESERVED_HANDLES = new Set(["admin", "yoy", "yoyfyi", "support", "help", "api", "root", "account", "login"]);
-  const MAX_BIO_LINKS = 30;
-
   async function bioForm(c: Context, u: User, values?: { handle: string; title: string; description: string; link: string[] }, errors: string[] = []) {
     const [page] = await sql`select * from bio_pages where user_id = ${u.id}`;
     const v = values ?? { handle: page?.handle ?? "", title: page?.title ?? "", description: page?.description ?? "", link: page?.link_ids ?? [] };
@@ -863,26 +860,8 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     const form = await c.req.parseBody({ all: true });
     const one = (k: string) => String([form[k] ?? ""].flat()[0] ?? "").trim();
     const values = { handle: one("handle").toLowerCase(), title: one("title"), description: one("description"), link: [form.link ?? []].flat().map(String) };
-    const errors: string[] = [];
-    if (!HANDLE.test(values.handle)) errors.push("Адреса (handle): 3–30 символів a-z 0-9 _ . -, починається з літери чи цифри.");
-    if (values.title.length > 100) errors.push("Заголовок (title): не більше 100 символів.");
-    if (values.description.length > 300) errors.push("Опис (description): не більше 300 символів.");
-    if (values.link.length > MAX_BIO_LINKS) errors.push(`Не більше ${MAX_BIO_LINKS} посилань.`);
-    else if (values.link.length) {
-      const own = values.link.every(isUuid) ? await sql`select id from links where service_id = ${u.serviceId} and id in ${sql(values.link)}` : [];
-      if (own.length !== new Set(values.link).size) errors.push("Обирайте лише свої посилання.");
-    }
-    if (!errors.length && RESERVED_HANDLES.has(values.handle)) errors.push(`${publicOrigin}/@${values.handle} уже зайнята (taken).`);
-    if (!errors.length) {
-      const [taken] = await sql`select 1 from bio_pages where handle = ${values.handle} and user_id <> ${u.id}`;
-      if (taken) errors.push(`${publicOrigin}/@${values.handle} уже зайнята (taken).`);
-    }
-    if (errors.length) return bioForm(c, u, values, errors);
-    await sql`
-      insert into bio_pages (user_id, handle, title, description, link_ids, updated_at)
-      values (${u.id}, ${values.handle}, ${values.title || null}, ${values.description || null}, ${sql.array([...new Set(values.link)], "uuid")}, ${now()})
-      on conflict (user_id) do update set handle = excluded.handle, title = excluded.title, description = excluded.description,
-        link_ids = excluded.link_ids, updated_at = excluded.updated_at`;
+    const saved = await saveBio(sql, { userId: u.id, serviceId: u.serviceId, publicOrigin, now: now() }, values);
+    if ("errors" in saved) return bioForm(c, u, values, saved.errors);
     return c.redirect("/account/bio", 303);
   });
 

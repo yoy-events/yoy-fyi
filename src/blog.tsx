@@ -228,7 +228,7 @@ export function blogRoutes({ publicOrigin, posts, indexable = true }: { publicOr
         "",
         `- MCP server (Streamable HTTP, OAuth 2.1): ${url("/mcp")}`,
         "- In claude.ai or ChatGPT, add it as a custom connector with that URL, then sign in with Google.",
-        "- Tools: create_link, update_link, disable_link, list_links, get_link, get_click_timeseries, get_click_breakdown, whoami.",
+        "- Tools: create_link, create_links, update_link, disable_link, list_links (search), get_link, get_qr (PNG image), get_click_timeseries, get_click_breakdown, get_bio, update_bio, whoami.",
         "",
         "## API",
         "",
