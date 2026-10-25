@@ -58,6 +58,7 @@ const app = createApp({
   webhookKey,
   unsafeUrls,
   telegram,
+  indexable: config.indexable,
   admin: {
     email: config.adminEmail,
     sessionSecret: config.sessionSecret,

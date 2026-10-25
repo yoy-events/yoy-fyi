@@ -83,6 +83,16 @@ describe("files for crawlers", () => {
     expect(text).toContain(`Sitemap: ${ORIGIN}/sitemap.xml`);
   });
 
+  test("outside production, robots.txt disallows everything and responses say noindex", async () => {
+    const sql: SQL = await testDb();
+    const test = createApp({ sql, publicOrigin: "https://test.yoy.fyi", countryOf: () => null, indexable: false });
+    const res = await test.request("https://test.yoy.fyi/robots.txt");
+    expect(await res.text()).toBe("User-agent: *\nDisallow: /\n");
+    expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    expect((await test.request("https://test.yoy.fyi/blog/uk")).headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    expect((await get("/blog/uk")).headers.get("x-robots-tag")).toBeNull();
+  });
+
   test("sitemap.xml lists the home page and every post in every language", async () => {
     const res = await get("/sitemap.xml");
     const text = await res.text();

@@ -11,6 +11,8 @@ export function loadConfig(env = process.env) {
     databaseUrl: required("DATABASE_URL"),
     geoipDbPath: env.GEOIP_DB_PATH ?? "data/dbip-country-lite.mmdb",
     port: Number(env.PORT ?? 3000),
+    // Only production is indexed by search engines; every other stage answers noindex.
+    indexable: env.STAGE === "prod",
     // The header the fronting proxy sets to the visitor's IP: cf-connecting-ip behind Cloudflare Tunnel.
     clientIpHeader: env.CLIENT_IP_HEADER?.toLowerCase() || undefined,
     // Secret: 32 random bytes, base64. Encrypts webhook signing secrets at rest.

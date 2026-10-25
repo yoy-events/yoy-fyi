@@ -34,6 +34,8 @@ export type AppDeps = {
   mcpLimit?: RateLimit;
   // The Telegram bot; without it there is no webhook and no Telegram account page.
   telegram?: TelegramConfig;
+  // False outside production: robots.txt disallows everything and every response says noindex.
+  indexable?: boolean;
   // Blog posts; the ones in content/blog by default.
   posts?: Post[];
   clientMetadata?: FetchClientMetadata;
@@ -84,6 +86,7 @@ export function createApp({
   clientMetadata,
   telegram,
   posts = POSTS,
+  indexable = true,
   countryOf,
   recordClick,
   now = () => new Date(),
@@ -134,7 +137,13 @@ export function createApp({
   );
 
   app.get("/health", (c) => c.json({ ok: true }));
-  app.route("/", blogRoutes({ publicOrigin, posts }));
+  if (!indexable) {
+    app.use(async (c, next) => {
+      await next();
+      c.header("X-Robots-Tag", "noindex, nofollow");
+    });
+  }
+  app.route("/", blogRoutes({ publicOrigin, posts, indexable }));
 
   // The contract is public, so agents and generators can read it without a key.
   app.get("/v1/openapi.json", (c) => c.json(spec));
