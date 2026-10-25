@@ -46,7 +46,7 @@ export function sourceOf(host: string | null, ownHost: string): string {
 }
 
 // Bio pages are counted as one path so handles don't flood the table.
-const PUBLIC = /^\/($|blog(\/|$)|docs(\/|$)|privacy$|terms$|@|llms\.txt$|robots\.txt$|sitemap\.xml$)/;
+const PUBLIC = /^\/($|(en|es|fr)(\/docs\/mcp)?$|blog(\/|$)|docs(\/|$)|privacy$|terms$|@|llms\.txt$|robots\.txt$|sitemap\.xml$)/;
 const normalise = (path: string) => (path.startsWith("/@") ? "/@*" : path.slice(0, 300));
 
 export function countPageViews(sql: SQL, publicOrigin: string, now: () => Date): MiddlewareHandler {

@@ -123,7 +123,7 @@ export function createApp({
   app.use((c, next) => {
     const path = c.req.path;
     // The personal pages (ADR-0004) load the same stylesheet and QR images and post forms like the admin.
-    if (path.startsWith("/admin") || path === "/" || path.startsWith("/@") || path.startsWith("/blog") || /^\/(links|account|privacy|terms|login|logout|docs)(\/|$)/.test(path)) {
+    if (path.startsWith("/admin") || path === "/" || path.startsWith("/@") || path.startsWith("/blog") || /^\/(links|account|privacy|terms|login|logout|docs|en|es|fr)(\/|$)/.test(path)) {
       return adminHeaders(c, next);
     }
     return path.startsWith("/oauth") ? oauthHeaders(c, next) : publicHeaders(c, next);

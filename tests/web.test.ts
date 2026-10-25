@@ -399,3 +399,46 @@ describe("landing and docs for search engines and AI", () => {
     expect(await (await get("/sitemap.xml")).text()).toContain(`<loc>${ORIGIN}/docs/mcp</loc>`);
   });
 });
+
+describe("landing and guide in four languages", () => {
+  test.each([
+    ["/", "uk", "Короткі посилання та QR-коди"],
+    ["/en", "en", "Short links and QR codes"],
+    ["/es", "es", "Enlaces cortos y códigos QR"],
+    ["/fr", "fr", "Liens courts et codes QR"],
+  ])("%s is the landing page in %s with hreflang alternates", async (path, lang, h1) => {
+    const html = await (await get(path)).text();
+    expect(html).toContain(`<html lang="${lang}">`);
+    expect(html).toContain(`<h1>${h1}</h1>`);
+    for (const [l, href] of [["uk", "/"], ["en", "/en"], ["es", "/es"], ["fr", "/fr"]]) {
+      expect(html).toContain(`hreflang="${l}" href="${ORIGIN}${href}"`);
+    }
+  });
+
+  test.each([
+    ["/docs/mcp", "uk"],
+    ["/en/docs/mcp", "en"],
+    ["/es/docs/mcp", "es"],
+    ["/fr/docs/mcp", "fr"],
+  ])("%s is the guide in %s", async (path, lang) => {
+    const html = await (await get(path)).text();
+    expect(html).toContain(`<html lang="${lang}">`);
+    expect(html).toContain("claude mcp add --transport http");
+  });
+
+  test.each(["/de", "/english", "/en/docs", "/xen"])("%s is not a language page", async (path) => {
+    expect((await get(path)).status).toBe(404);
+  });
+
+  test("a signed-in user on /en gets a link to their links", async () => {
+    const { cookie } = await signIn();
+    expect(await (await get("/en", cookie)).text()).toContain(">My links<");
+  });
+
+  test("the sitemap lists every language of the landing page and guide", async () => {
+    const text = await (await get("/sitemap.xml")).text();
+    for (const path of ["/", "/en", "/es", "/fr", "/docs/mcp", "/en/docs/mcp", "/es/docs/mcp", "/fr/docs/mcp"]) {
+      expect(text).toContain(`<loc>${ORIGIN}${path}</loc>`);
+    }
+  });
+});
