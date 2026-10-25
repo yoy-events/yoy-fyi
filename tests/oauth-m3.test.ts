@@ -117,6 +117,9 @@ describe("dynamic client registration", () => {
     expect(consent.status).toBe(200);
     expect(html).toContain("Cursor");
     expect(html).toContain("не перевіряв");
+    // A private-use scheme is shown whole, with the app-on-this-device warning.
+    expect(html).toContain("cursor://anysphere.cursor-mcp");
+    expect(html).toContain("в програму на цьому пристрої");
 
     const pending = (await pendingFrom(await authorize(body.client_id, "http://localhost:8787/callback")))!;
     const service = (await sql`select id from services`)[0].id;
@@ -124,6 +127,7 @@ describe("dynamic client registration", () => {
     const code = new URL(approved.headers.get("location")!).searchParams.get("code")!;
     const tokens = await form("/oauth/token", { grant_type: "authorization_code", code, redirect_uri: "http://localhost:8787/callback", client_id: body.client_id, code_verifier: VERIFIER }, "");
     expect(tokens.status).toBe(200);
+    expect(await (await get("/account/apps")).text()).toContain("Cursor (зареєструвався сам, не перевірено)");
   });
 
   test.each([
