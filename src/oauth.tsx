@@ -161,7 +161,6 @@ export function oauthRoutes(deps: Deps) {
   const resource = `${publicOrigin}/mcp`;
   const app = new Hono<Env>();
   const limitUnknownFetch = createRateLimiter({ perMinute: 10 / 60, burst: 10 });
-  const limitAllUnknown = createRateLimiter({ perMinute: 120 / 60, burst: 60 });
   const limitAuthorize = createRateLimiter(deps.authorizeLimit ?? { perMinute: 30, burst: 30 });
   const limitToken = createRateLimiter(deps.tokenLimit ?? { perMinute: 20, burst: 20 });
   // Who is approving: the admin (any service) or a user (their own service only). Admin wins.
@@ -235,12 +234,13 @@ export function oauthRoutes(deps: Deps) {
     if (cached && now().getTime() - new Date(cached.fetched_at).getTime() < CLIENT_CACHE_MS) {
       return { name: cached.name, redirect_uris: cached.redirect_uris, ...known };
     }
-    // Documents on unknown hosts are fetched a limited number of times per visitor, per document
-    // and in total, so the authorize page can't make yoy.fyi send many requests anywhere. Over the
+    // Documents on unknown hosts are fetched a limited number of times per visitor, per host and
+    // per document, so the authorize page can't make yoy.fyi send many requests anywhere. There is
+    // no shared global bucket: one visitor must not be able to block clients for everyone. Over the
     // limit, a cached document up to a week old is still used; anything older fails closed.
     if (!known.verified) {
       const allowed =
-        limitUnknownFetch(ip ? rateLimitKey(ip) : "no-ip").ok && limitUnknownFetch(`doc:${clientId}`).ok && limitAllUnknown("all").ok;
+        (!ip || limitUnknownFetch(rateLimitKey(ip)).ok) && limitUnknownFetch(`host:${url.hostname}`).ok && limitUnknownFetch(`doc:${clientId}`).ok;
       if (!allowed) {
         const fresh = cached && now().getTime() - new Date(cached.fetched_at).getTime() < STALE_CLIENT_MS;
         return fresh ? { name: cached.name, redirect_uris: cached.redirect_uris, ...known } : null;
@@ -267,8 +267,8 @@ export function oauthRoutes(deps: Deps) {
       400,
     );
 
-  async function consentPage(c: Context, pending: Pending, who: Approver) {
-    const client = await loadClient(pending.client_id);
+  async function consentPage(c: Context<Env>, pending: Pending, who: Approver) {
+    const client = await loadClient(pending.client_id, c.env?.ip);
     if (!client) return errorPage(c, "Не вдалося визначити застосунок.");
     const { services } = who;
     const back = new URL(pending.redirect_uri);
