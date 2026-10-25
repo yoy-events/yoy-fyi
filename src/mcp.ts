@@ -347,8 +347,16 @@ export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120
         const args = params?.arguments ?? {};
         if (!tool) return rpcError(c, 200, reqId, -32602, `Unknown tool: ${String(params?.name)}`);
         if (typeof args !== "object" || Array.isArray(args)) return rpcError(c, 200, reqId, -32602, "arguments must be an object");
+        const started = performance.now();
         const result = await tool.run(args as Json, apiFor(caller), { ...caller, sql });
+        const ms = Math.round(performance.now() - started);
         console.log(JSON.stringify({ mcp: tool.name, service: caller.serviceId, ok: !result.isError }));
+        // The log behind the admin AI page; a failed insert never fails the call.
+        await sql`
+          insert into mcp_calls (id, at, service_id, client, tool, ok, ms)
+          values (${Bun.randomUUIDv7()}, ${now()}, ${caller.serviceId}, ${caller.client ?? null}, ${tool.name}, ${!result.isError}, ${ms})`.catch((err) =>
+          console.error("mcp call not logged", String(err)),
+        );
         return ok(result);
       }
       default:

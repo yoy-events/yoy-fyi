@@ -41,6 +41,7 @@ export type LinkRow = {
   disabled_at: Date | null;
   disabled_by: "owner" | "admin" | "safe_browsing" | null;
   created_via: CreatedVia;
+  created_by_client: string | null;
 };
 
 // The Open Graph preview link-preview bots see instead of the redirect (see app.ts).
@@ -230,6 +231,7 @@ export async function createLink(
   body: Record<string, unknown>,
   idempotencyKey: string | null = null,
   createdVia: CreatedVia = "api",
+  createdByClient: string | null = null,
 ): Promise<CreateResult> {
   const fields = validateLinkCreate(body, new Date());
   if (Object.keys(fields).length) {
@@ -266,12 +268,12 @@ export async function createLink(
       const [row]: LinkRow[] = await sql`
         insert into links (id, service_id, code, target_url, title, tags, utm_defaults, preview, pass_click_id,
                            expires_at, ext_service, ext_entity_type, ext_entity_id, idempotency_key, idempotency_hash,
-                           created_via)
+                           created_via, created_by_client)
         values (${Bun.randomUUIDv7()}, ${serviceId}, ${code}, ${input.target_url}, ${input.title ?? null},
                 ${sql.array(input.tags ?? [], "text")}, ${input.utm_defaults ?? null}, ${input.preview ?? null}, ${input.pass_click_id ?? false},
                 ${input.expires_at ?? null}, ${input.external_ref?.service ?? null},
                 ${input.external_ref?.entity_type ?? null}, ${input.external_ref?.entity_id ?? null},
-                ${idempotencyKey}, ${idempotencyKey ? hash : null}, ${createdVia})
+                ${idempotencyKey}, ${idempotencyKey ? hash : null}, ${createdVia}, ${createdByClient})
         returning *`;
       return { kind: "created", row: row! };
     } catch (err) {
@@ -360,7 +362,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createL
     }
     const body = await readJsonObject(c);
     if (!body) return apiError(c, 400, "invalid_request", "Body must be a JSON object.");
-    const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, caller.serviceId, body, idempotencyKey, c.env?.createdVia);
+    const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, caller.serviceId, body, idempotencyKey, c.env?.createdVia, caller.client ?? null);
     if (result.kind === "error") return apiError(c, result.status, result.code, result.message, result.details);
     if (result.kind === "created") c.header("Location", `/v1/links/${result.row.id}`);
     return c.json(toLink(result.row, publicOrigin), result.kind === "created" ? 201 : 200);

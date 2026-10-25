@@ -65,7 +65,8 @@ export async function issueKey(sql: SQL, input: { serviceSlug: string; name: str
   return insertKey(sql, service.id, input.name, input.scopes);
 }
 
-export type Caller = { keyId: string; serviceId: string; scopes: Scope[] };
+// `client` is the OAuth client_id when the caller is an OAuth grant (ADR-0003), absent for API keys.
+export type Caller = { keyId: string; serviceId: string; scopes: Scope[]; client?: string };
 
 export async function authenticate(sql: SQL, header: string | undefined): Promise<Caller | null> {
   const match = TOKEN.exec(header?.replace(/^Bearer /, "") ?? "");
