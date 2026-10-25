@@ -311,9 +311,10 @@ describe("OAuth tokens on /mcp", () => {
 
     const who = await callTool(access_token, "whoami", {});
     expect(who.structuredContent).toMatchObject({ service: { slug: "yoy" }, scopes: ["links:read"] });
-    const denied = await callTool(access_token, "create_link", { target_url: "https://example.com/" });
-    expect(denied.isError).toBe(true);
-    expect(denied.content[0].text).toContain("links:write");
+    // A missing scope is a step-up (see oauth-m2.test.ts), not a tool error.
+    const denied = await mcp(access_token, "tools/call", { name: "create_link", arguments: { target_url: "https://example.com/" } });
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error.message).toContain("links:write");
   });
 
   test("expire after an hour", async () => {

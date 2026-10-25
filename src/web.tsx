@@ -1083,10 +1083,17 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   // OAuth connections from claude.ai, ChatGPT and other MCP clients to this user's service.
   app.get("/account/apps", async (c) => {
     const u = c.get("user");
-    const grants: { id: string; client: string; scopes: string[]; created_at: Date; last_used_at: Date | null }[] = await sql`
-      select g.id, coalesce(cl.name, g.client_id) as client, g.scopes, g.created_at, g.last_used_at
+    // Calls are logged per client and account, so a client's calls show on each of its connections.
+    const grants: { id: string; client: string; scopes: string[]; created_at: Date; last_used_at: Date | null; calls: number; tools: string[] | null }[] = await sql`
+      select g.id, coalesce(cl.name, g.client_id) as client, g.scopes, g.created_at, g.last_used_at,
+             (select count(*) from mcp_calls m where m.service_id = g.service_id and m.client = g.client_id
+                and m.at >= ${new Date(now().getTime() - 30 * DAY)})::int as calls,
+             (select array_agg(tool order by last desc) from
+                (select tool, max(at) as last from mcp_calls m where m.service_id = g.service_id and m.client = g.client_id
+                 group by tool order by last desc limit 5) t) as tools
       from oauth_grants g left join oauth_clients cl on cl.client_id = g.client_id
       where g.service_id = ${u.serviceId} and g.revoked_at is null and g.refresh_expires_at > ${now()}
+        and g.created_at > ${new Date(now().getTime() - 90 * DAY)}
       order by g.created_at desc`;
     const when = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") : "ніколи");
     return c.html(
@@ -1096,6 +1103,13 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           Щоб працювати з посиланнями з чату, додайте <code>{publicOrigin}/mcp</code> як конектор у claude.ai чи ChatGPT і ввійдіть
           тим самим Google-акаунтом.
         </p>
+        {grants.length > 1 && (
+          <form method="post" action="/account/apps/revoke-all">
+            <button type="submit" class="danger">
+              Відключити всі
+            </button>
+          </form>
+        )}
         {grants.length > 0 && (
           <ul class="list">
             {grants.map((g) => (
@@ -1103,6 +1117,10 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
                 <strong>{g.client}</strong>
                 <span class="meta">
                   {g.scopes.join(", ")} · підключено {when(g.created_at)} · останнє використання {when(g.last_used_at)}
+                </span>
+                <span class="meta">
+                  викликів за 30 днів: {g.calls}
+                  {g.tools?.length ? ` · останні: ${g.tools.join(", ")}` : ""}
                 </span>
                 <form method="post" action={`/account/apps/${g.id}/revoke`}>
                   <button type="submit" class="danger">
@@ -1115,6 +1133,11 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         )}
       </Page>,
     );
+  });
+
+  app.post("/account/apps/revoke-all", async (c) => {
+    await sql`update oauth_grants set revoked_at = ${now()} where service_id = ${c.get("user").serviceId} and revoked_at is null`;
+    return c.redirect("/account/apps", 303);
   });
 
   app.post("/account/apps/:id/revoke", async (c) => {
