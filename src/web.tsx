@@ -114,7 +114,7 @@ function Page({
         </header>
         <main>{children}</main>
         <footer class="meta">
-          <a href="/privacy">Конфіденційність</a> · <a href="/terms">Умови</a>
+          <a href="/blog/uk">Блог</a> · <a href="/privacy">Конфіденційність</a> · <a href="/terms">Умови</a>
         </footer>
       </body>
     </html>
@@ -517,8 +517,8 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     const dayEnd = Math.floor(now().getTime() / DAY) * DAY + DAY;
     const scope = { serviceId: u.serviceId, linkId: link.id, tag: null, from: new Date(dayEnd - 30 * DAY), to: new Date(dayEnd), bots: "exclude" as const };
     const daily = await timeseries(sql, scope, "day");
-    const [referrers, countries, devices] = await Promise.all(
-      (["referer_host", "country", "device"] as const).map((d) => breakdown(sql, scope, d, 5)),
+    const [referrers, channels, countries, devices] = await Promise.all(
+      (["referer_host", "utm_source", "country", "device"] as const).map((d) => breakdown(sql, scope, d, 5)),
     );
     return c.html(
       <Page title={link.title ?? link.code} user={u} bot={telegramBot}>
@@ -596,6 +596,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         </p>
         <div class="rankings">
           <Ranking title="Джерела" items={referrers!.items} total={referrers!.total_clicks} />
+          <Ranking title="Канали (utm_source)" items={channels!.items} total={channels!.total_clicks} />
           <Ranking title="Країни" items={countries!.items} total={countries!.total_clicks} />
           <Ranking title="Пристрої" items={devices!.items} total={devices!.total_clicks} />
         </div>
