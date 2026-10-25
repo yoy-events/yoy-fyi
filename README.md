@@ -34,7 +34,7 @@ Errors throw `YoyFyiError` with `status`, `code` and `details`, as described in 
 
 ## Use it from an AI agent (MCP)
 
-`https://yoy.fyi/mcp` is a remote MCP server with eight tools: `whoami`, `list_links`, `get_link`, `create_link`, `update_link`, `disable_link`, `get_click_timeseries` and `get_click_breakdown`. They act for the service of the key you connect with. Links created this way are marked `created_via: "mcp"`.
+`https://yoy.fyi/mcp` is a remote MCP server with twelve tools: `whoami`, `list_links` (with text search), `get_link`, `create_link`, `create_links` (up to 20), `update_link`, `disable_link`, `get_qr` (a PNG image), `get_click_timeseries`, `get_click_breakdown`, and `get_bio` / `update_bio` for the yoy.fyi/@handle page of a personal account. They act for the service of the key you connect with. Links created this way are marked `created_via: "mcp"`.
 
 In Claude Code, using a key with the scopes you want the agent to have:
 

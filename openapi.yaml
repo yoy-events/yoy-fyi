@@ -85,6 +85,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - name: q
+          in: query
+          description: Text to find, case-insensitively, in the code, title or target URL. Wildcards are matched literally.
+          schema: { type: string, maxLength: 200 }
         - name: tag
           in: query
           description: Links carrying this tag.

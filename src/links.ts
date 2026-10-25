@@ -379,14 +379,19 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createL
       !["active", "expired", "disabled", "all"].includes(status) ||
       (q.tag !== undefined && !TAG.test(q.tag)) ||
       (q.code !== undefined && !CODE.test(q.code)) ||
+      (q.q !== undefined && q.q.length > 200) ||
       [q.created_after, q.created_before].some((t) => t !== undefined && !RFC3339.test(t));
     if (bad) return apiError(c, 400, "invalid_request", "Invalid query parameter.");
+    // `q` matches code, title or target as plain text; LIKE wildcards in it are escaped.
+    const search = (q.q ?? "").trim();
+    const pattern = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
 
     const rows: LinkRow[] = await sql`
       select * from links
       where service_id = ${c.get("caller").serviceId}
         and (${q.tag ?? null}::text is null or tags @> array[${q.tag ?? null}::text])
         and (${q.code ?? null}::text is null or code = ${q.code ?? null})
+        and (${search} = '' or code ilike ${pattern} or title ilike ${pattern} or target_url ilike ${pattern})
         and (${q.ext_service ?? null}::text is null or ext_service = ${q.ext_service ?? null})
         and (${q.ext_entity_type ?? null}::text is null or ext_entity_type = ${q.ext_entity_type ?? null})
         and (${q.ext_entity_id ?? null}::text is null or ext_entity_id = ${q.ext_entity_id ?? null})
