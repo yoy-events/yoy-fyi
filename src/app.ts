@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { type AdminConfig, adminRoutes } from "./admin";
 import { analyticsRoutes } from "./analytics";
+import { type Post, blogRoutes, loadPosts } from "./blog";
 import { requireKey } from "./auth";
 import { type Click, describeUserAgent, insertClick, queryFields, refererHost } from "./click";
 import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
@@ -33,6 +34,8 @@ export type AppDeps = {
   mcpLimit?: RateLimit;
   // The Telegram bot; without it there is no webhook and no Telegram account page.
   telegram?: TelegramConfig;
+  // Blog posts; the ones in content/blog by default.
+  posts?: Post[];
   clientMetadata?: FetchClientMetadata;
 };
 
@@ -40,6 +43,7 @@ export type AppDeps = {
 type Env = { Bindings: { ip?: string } };
 
 const CODE = /^[A-Za-z0-9_-]{1,64}$/;
+const POSTS = loadPosts(new URL("../content/blog", import.meta.url).pathname);
 const spec = Bun.YAML.parse(await Bun.file(new URL("../openapi.yaml", import.meta.url).pathname).text());
 
 type LinkRow = {
@@ -79,6 +83,7 @@ export function createApp({
   mcpLimit,
   clientMetadata,
   telegram,
+  posts = POSTS,
   countryOf,
   recordClick,
   now = () => new Date(),
@@ -113,7 +118,7 @@ export function createApp({
   app.use((c, next) => {
     const path = c.req.path;
     // The personal pages (ADR-0004) load the same stylesheet and QR images and post forms like the admin.
-    if (path.startsWith("/admin") || path === "/" || path.startsWith("/@") || /^\/(links|account|privacy|terms|login|logout)(\/|$)/.test(path)) {
+    if (path.startsWith("/admin") || path === "/" || path.startsWith("/@") || path.startsWith("/blog") || /^\/(links|account|privacy|terms|login|logout)(\/|$)/.test(path)) {
       return adminHeaders(c, next);
     }
     return path.startsWith("/oauth") ? oauthHeaders(c, next) : publicHeaders(c, next);
@@ -129,6 +134,7 @@ export function createApp({
   );
 
   app.get("/health", (c) => c.json({ ok: true }));
+  app.route("/", blogRoutes({ publicOrigin, posts }));
 
   // The contract is public, so agents and generators can read it without a key.
   app.get("/v1/openapi.json", (c) => c.json(spec));

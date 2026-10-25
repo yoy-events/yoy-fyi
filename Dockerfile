@@ -18,6 +18,7 @@ COPY --from=geoip /app/data data
 COPY package.json tsconfig.json ./
 COPY openapi.yaml ./
 COPY migrations migrations
+COPY content content
 COPY src src
 USER bun
 EXPOSE 3000
