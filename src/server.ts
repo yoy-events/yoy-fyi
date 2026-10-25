@@ -24,6 +24,9 @@ every(sql, "partitions", 6 * 3600_000, async () => {
   // The MCP call log is kept as long as raw clicks (13 months).
   await sql`delete from mcp_calls where at < now() - interval '13 months'`;
   await sql`delete from page_views where at < now() - interval '13 months'`;
+  // Self-registered OAuth clients that never got a connection are dropped after a day.
+  await sql`delete from oauth_clients c where c.kind = 'dcr' and c.created_at < now() - interval '1 day'
+            and not exists (select 1 from oauth_grants g where g.client_id = c.client_id)`;
 });
 every(sql, "rollup", 5 * 60_000, () => rollupRecent(sql));
 

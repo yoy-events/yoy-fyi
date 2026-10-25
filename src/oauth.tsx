@@ -18,8 +18,8 @@ export const OAUTH_SCOPES = ["links:read", "analytics:read", "links:write"] as c
 export type ClientMetadata = { client_id: string; client_name?: string; redirect_uris: string[] };
 export type FetchClientMetadata = (clientId: string) => Promise<ClientMetadata | null>;
 
-// Client ID documents are fetched only from these registrable domains. A client elsewhere is
-// refused and logged, so a new legitimate host shows up in the logs before it is added here.
+// Client ID documents on these registrable domains are shown as known apps. A document on any
+// other https host is accepted too, but the consent page marks it as unverified and shows its domain.
 const CLIENT_HOSTS = ["claude.ai", "claude.com", "anthropic.com", "chatgpt.com", "openai.com"];
 const SCOPE_TEXT: Record<string, string> = {
   "links:read": "Переглядати й читати короткі посилання",
@@ -63,6 +63,22 @@ function redirectAllowed(declared: string[], actual: string): boolean {
       return false;
     }
   });
+}
+
+// Schemes a registered client may not use as its redirect: they run code or read local data.
+const FORBIDDEN_SCHEMES = new Set(["javascript:", "data:", "file:", "vbscript:", "blob:", "about:", "ws:", "wss:", "ftp:"]);
+function registrableRedirect(raw: string): boolean {
+  if (raw.length > 512) return false;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.hash || raw.includes("#")) return false;
+  if (u.protocol === "https:") return true;
+  if (u.protocol === "http:") return isLoopback(u);
+  return /^[a-z][a-z0-9+.-]*:$/.test(u.protocol) && !FORBIDDEN_SCHEMES.has(u.protocol);
 }
 
 const withParams = (base: string, params: Record<string, string | undefined>) => {
@@ -180,14 +196,31 @@ export function oauthRoutes(deps: Deps) {
       client_id_metadata_document_supported: true,
       authorization_response_iss_parameter_supported: true,
       revocation_endpoint: `${publicOrigin}/oauth/revoke`,
+      registration_endpoint: `${publicOrigin}/oauth/register`,
       revocation_endpoint_auth_methods_supported: ["none"],
     }),
   );
 
-  // Cached client metadata, refetched once a day.
-  async function loadClient(clientId: string): Promise<{ name: string; redirect_uris: string[] } | null> {
-    const [cached] = await sql`select name, redirect_uris, fetched_at from oauth_clients where client_id = ${clientId}`;
-    if (cached && now().getTime() - new Date(cached.fetched_at).getTime() < CLIENT_CACHE_MS) return cached;
+  type Client = { name: string; redirect_uris: string[]; verified: boolean; domain: string | null };
+
+  // A registered (dcr_) client from the table, or a metadata-document client, cached for a day.
+  async function loadClient(clientId: string): Promise<Client | null> {
+    if (clientId.startsWith("dcr_")) {
+      const [row] = await sql`select name, redirect_uris from oauth_clients where client_id = ${clientId} and kind = 'dcr'`;
+      return row ? { name: row.name, redirect_uris: row.redirect_uris, verified: false, domain: null } : null;
+    }
+    let url: URL;
+    try {
+      url = new URL(clientId);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "https:") return null;
+    const known = { verified: hostAllowed(url.hostname), domain: url.hostname };
+    const [cached] = await sql`select name, redirect_uris, fetched_at from oauth_clients where client_id = ${clientId} and kind = 'cimd'`;
+    if (cached && now().getTime() - new Date(cached.fetched_at).getTime() < CLIENT_CACHE_MS) {
+      return { name: cached.name, redirect_uris: cached.redirect_uris, ...known };
+    }
     const doc = await deps.clientMetadata(clientId);
     const uris = doc?.redirect_uris;
     if (!doc || doc.client_id !== clientId || !Array.isArray(uris) || !uris.every((u) => typeof u === "string")) return null;
@@ -196,7 +229,8 @@ export function oauthRoutes(deps: Deps) {
       insert into oauth_clients (client_id, name, redirect_uris, fetched_at)
       values (${clientId}, ${name}, ${sql.array(uris, "text")}, ${now()})
       on conflict (client_id) do update set name = excluded.name, redirect_uris = excluded.redirect_uris, fetched_at = excluded.fetched_at`;
-    return { name, redirect_uris: uris };
+    if (!known.verified) console.warn("oauth client from an unverified host", { host: url.hostname });
+    return { name, redirect_uris: uris, ...known };
   }
 
   const errorPage = (c: Context, message: string) =>
@@ -212,7 +246,7 @@ export function oauthRoutes(deps: Deps) {
     const client = await loadClient(pending.client_id);
     if (!client) return errorPage(c, "Не вдалося визначити застосунок.");
     const { services } = who;
-    const host = new URL(pending.redirect_uri).host;
+    const host = new URL(pending.redirect_uri).host || pending.redirect_uri.split(":")[0];
     return c.html(
       <Layout title="Підключити застосунок" signedIn={who.admin}>
         <h1>Підключити {client.name}</h1>
@@ -220,6 +254,13 @@ export function oauthRoutes(deps: Deps) {
           {client.name} просить доступ до yoy.fyi для одного сервісу. Після рішення ви повернетеся на <strong>{host}</strong>.
         </p>
         <p class="meta">Ви ввійшли як {who.label}.</p>
+        {!client.verified && (
+          <p class="notice">
+            yoy.fyi не перевіряв цей застосунок
+            {client.domain ? <>: його опис лежить на <strong>{client.domain}</strong></> : ", він зареєструвався сам"}. Назву «{client.name}» він
+            указав сам. Дозволяйте, лише якщо ви щойно самі підключали yoy.fyi у цьому застосунку.
+          </p>
+        )}
         {isLoopback(new URL(pending.redirect_uri)) && (
           <p class="notice">
             Після рішення вас поверне на адресу localhost, тобто на програму на цьому комп'ютері. Дозволяйте, лише якщо ви саме зараз підключаєте
@@ -295,16 +336,6 @@ export function oauthRoutes(deps: Deps) {
     // Until the client and its redirect are verified, errors stay on this page (no open redirect).
     const clientId = q.client_id ?? "";
     const redirectUri = q.redirect_uri ?? "";
-    let clientUrl: URL;
-    try {
-      clientUrl = new URL(clientId);
-    } catch {
-      return errorPage(c, "client_id must be an https URL.");
-    }
-    if (clientUrl.protocol !== "https:" || !hostAllowed(clientUrl.hostname)) {
-      console.warn("oauth client host refused", { host: clientUrl.hostname });
-      return errorPage(c, "Цьому застосунку не дозволено підключатися.");
-    }
     const client = await loadClient(clientId);
     if (!client) return errorPage(c, "Не вдалося прочитати опис застосунку.");
     if (!redirectUri || !redirectAllowed(client.redirect_uris, redirectUri)) return errorPage(c, "Адреса повернення не збігається з тією, яку оголосив застосунок.");
@@ -323,7 +354,7 @@ export function oauthRoutes(deps: Deps) {
     // A user who already granted this client these scopes, for this exact https redirect, is not
     // asked again (like Google's "already approved"). Never for loopback redirects: any program on
     // the computer can claim a client's name there. The admin picks a service, so always sees consent.
-    if (who && !who.admin && !isLoopback(new URL(redirectUri))) {
+    if (who && !who.admin && client.verified && redirectUri.startsWith("https://")) {
       const serviceId = who.services[0]!.id;
       const [held] = await sql`
         select 1 from oauth_grants g
@@ -374,6 +405,43 @@ export function oauthRoutes(deps: Deps) {
     const [deleted] = await sql`delete from oauth_pending where id = ${pending.id} returning id`;
     if (!deleted) return errorPage(c, "На цей запит уже відповіли.");
     return back({ code: await issueCode(pending, service.id, granted) });
+  });
+
+  // RFC 7591 for clients without a metadata document (Cursor and others): public clients only,
+  // redirects to https, loopback http or a private-use scheme. The consent page marks them unverified.
+  const limitRegister = createRateLimiter({ perMinute: 10 / 60, burst: 10 });
+  app.post("/oauth/register", async (c) => {
+    const ip = c.env?.ip;
+    if (ip && !limitRegister(rateLimitKey(ip)).ok) return c.json({ error: "slow_down", error_description: "Too many registrations." }, 429);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const bad = (error: string, description: string) => c.json({ error, error_description: description }, 400);
+    if (!body || typeof body !== "object" || Array.isArray(body)) return bad("invalid_client_metadata", "Send a JSON object.");
+    const uris = body.redirect_uris;
+    if (!Array.isArray(uris) || uris.length === 0 || uris.length > 10) return bad("invalid_redirect_uri", "redirect_uris: 1 to 10 URIs.");
+    if (!uris.every((u) => typeof u === "string" && registrableRedirect(u))) {
+      return bad("invalid_redirect_uri", "Redirects must be https, http on localhost, or a private-use scheme, without a fragment.");
+    }
+    const auth = body.token_endpoint_auth_method ?? "none";
+    if (auth !== "none") return bad("invalid_client_metadata", "Only public clients (token_endpoint_auth_method none) are supported.");
+    const name = typeof body.client_name === "string" && body.client_name.trim() ? body.client_name.trim().slice(0, 100) : "Невідомий застосунок";
+    const clientId = `dcr_${random()}`;
+    const at = now();
+    await sql`
+      insert into oauth_clients (client_id, name, redirect_uris, fetched_at, kind, created_at)
+      values (${clientId}, ${name}, ${sql.array(uris as string[], "text")}, ${at}, 'dcr', ${at})`;
+    c.header("Cache-Control", "no-store");
+    return c.json(
+      {
+        client_id: clientId,
+        client_id_issued_at: Math.floor(at.getTime() / 1000),
+        client_name: name,
+        redirect_uris: uris,
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      },
+      201,
+    );
   });
 
   // RFC 7009: either token of a grant ends the whole grant. The answer is 200 whether or not the

@@ -461,17 +461,20 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           </li>
           <li>Увійдіть через Google і дозвольте доступ. Доступність режиму залежить від тарифу ChatGPT.</li>
         </ol>
-        <h2>Claude Code, Cursor та інші програми</h2>
+        <h2>Claude Code</h2>
+        <pre>
+          <code>{`claude mcp add --transport http yoy-fyi ${publicOrigin}/mcp`}</code>
+        </pre>
+        <p>Потім у Claude Code виконайте /mcp, оберіть yoy-fyi й увійдіть через Google у браузері.</p>
+        <h2>Cursor, VS Code та інші</h2>
+        <p>Для Cursor додайте сервер у файл mcp.json, і під час першого підключення Cursor відкриє вхід через Google:</p>
+        <pre>
+          <code>{JSON.stringify({ mcpServers: { "yoy-fyi": { url: `${publicOrigin}/mcp` } } }, null, 2)}</code>
+        </pre>
         <p>
-          Створіть API-ключ на сторінці <a href="/account/keys">API-ключі</a> і передайте його в заголовку. Для Claude Code:
+          Якщо програма не вміє входити через OAuth, створіть ключ на сторінці <a href="/account/keys">API-ключі</a> і передайте його в заголовку{" "}
+          <code>Authorization: Bearer yfi_...</code>.
         </p>
-        <pre>
-          <code>{`claude mcp add --transport http yoy-fyi ${publicOrigin}/mcp --header "Authorization: Bearer yfi_..."`}</code>
-        </pre>
-        <p>Для Cursor, у файлі mcp.json:</p>
-        <pre>
-          <code>{JSON.stringify({ mcpServers: { "yoy-fyi": { url: `${publicOrigin}/mcp`, headers: { Authorization: "Bearer yfi_..." } } } }, null, 2)}</code>
-        </pre>
         <h2>Інструменти</h2>
         <ul>
           {TOOL_DOCS.map(([name, text]) => (
