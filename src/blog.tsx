@@ -65,6 +65,8 @@ function Shell(props: { lang: Lang; title: string; description: string; canonica
         <meta property="og:url" content={props.canonical} />
         <meta property="og:type" content="article" />
         <link rel="stylesheet" href="/static/admin.css" />
+        <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/favicon.ico" sizes="48x48" />
         <link rel="alternate" type="application/rss+xml" href={`/blog/${props.lang}/rss.xml`} />
         {props.jsonLd && <script type="application/ld+json">{raw(JSON.stringify(props.jsonLd).replace(/</g, "\\u003c"))}</script>}
       </head>
