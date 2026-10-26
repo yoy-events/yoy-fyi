@@ -87,13 +87,14 @@ describe("transport and auth", () => {
   });
 
   test("an unknown method returns -32601", async () => {
-    expect((await rpc("resources/list")).error?.code).toBe(-32601);
+    // prompts are not offered; resources are (see mcp-parity.test.ts)
+    expect((await rpc("prompts/list")).error?.code).toBe(-32601);
   });
 
-  test("initialize echoes a supported protocol version and offers tools only", async () => {
+  test("initialize echoes a supported protocol version and offers tools and resources", async () => {
     const { result } = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
     expect(result.protocolVersion).toBe("2025-06-18");
-    expect(result.capabilities).toEqual({ tools: {} });
+    expect(result.capabilities).toEqual({ tools: {}, resources: {} });
     expect(result.serverInfo.name).toBe("yoy.fyi");
   });
 

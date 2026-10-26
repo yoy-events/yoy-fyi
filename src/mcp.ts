@@ -8,6 +8,7 @@ import { OAUTH_SCOPES, authenticateOAuth } from "./oauth";
 import { bioErrorText, getBio, saveBio } from "./bio";
 import { MESSAGES } from "./messages";
 import { qrOptions, qrPng } from "./qr";
+import { CLICKS_CHART_URI, LINK_CARD_URI, readView, viewResources } from "./widgets";
 import { type RateLimit, createRateLimiter } from "./ratelimit";
 
 // The /v1 router; only its in-process `request` is used.
@@ -20,7 +21,7 @@ const HOURLY_MAX_MS = 7 * 86_400_000;
 
 type Json = Record<string, unknown>;
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
-type ToolResult = { content: Content[]; structuredContent?: Json; isError?: boolean };
+type ToolResult = { content: Content[]; structuredContent?: Json; isError?: boolean; _meta?: Json };
 type Api = (method: string, path: string, opts?: { query?: Json; body?: Json; headers?: Record<string, string> }) => Promise<ToolResult>;
 
 type Tool = {
@@ -28,6 +29,8 @@ type Tool = {
   scope: string | null; // the OAuth scope the tool needs; null = any
 
   title: string;
+  // The MCP Apps view that shows this tool's result in chats that support it (see widgets.ts).
+  ui?: string;
   description: string;
   annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: false };
   inputSchema: Json;
@@ -161,6 +164,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "get_link",
+    ui: LINK_CARD_URI,
     scope: "links:read",
     title: "Get a short link",
     description: "Returns one short link of this service, looked up by id or by code (exactly one of them).",
@@ -179,6 +183,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "create_link",
+    ui: LINK_CARD_URI,
     scope: "links:write",
     title: "Create a short link",
     description:
@@ -238,6 +243,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "get_click_timeseries",
+    ui: CLICKS_CHART_URI,
     scope: "analytics:read",
     title: "Get clicks over time",
     description: "Returns click and unique-visitor counts per UTC hour or day. Hourly ranges are limited to 7 days here.",
@@ -405,9 +411,10 @@ const TOOLS: Tool[] = [
 ];
 
 // securitySchemes tells ChatGPT which OAuth scope each tool needs.
-const listed = TOOLS.map(({ run: _, scope, ...tool }) => ({
+const listed = TOOLS.map(({ run: _, scope, ui, ...tool }) => ({
   ...tool,
   securitySchemes: [{ type: "oauth2", scopes: scope ? [scope] : [] }],
+  ...(ui ? { _meta: { ui: { resourceUri: ui } } } : {}),
 }));
 
 const rpcError = (c: Context, status: 200 | 400 | 403, id: unknown, code: number, message: string) =>
@@ -474,7 +481,7 @@ export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120
         const asked = params?.protocolVersion;
         return ok({
           protocolVersion: PROTOCOL_VERSIONS.includes(asked as string) ? asked : PROTOCOL_VERSIONS[0],
-          capabilities: { tools: {} },
+          capabilities: { tools: {}, resources: {} },
           serverInfo: { name: "yoy.fyi", version: "1.0.0" },
           instructions: INSTRUCTIONS,
         });
@@ -483,6 +490,12 @@ export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120
         return ok({});
       case "tools/list":
         return ok({ tools: listed });
+      case "resources/list":
+        return ok({ resources: viewResources() });
+      case "resources/read": {
+        const view = readView(params?.uri);
+        return view ? ok(view) : rpcError(c, 200, reqId, -32002, `Unknown resource: ${String(params?.uri)}`);
+      }
       case "tools/call": {
         const tool = TOOLS.find((t) => t.name === params?.name);
         const args = params?.arguments ?? {};
@@ -502,6 +515,12 @@ export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120
         const started = performance.now();
         const result = await tool.run(args as Json, apiFor(caller), { ...caller, sql, publicOrigin });
         const ms = Math.round(performance.now() - started);
+        // The link card also draws the QR code; it travels in _meta, which the model never sees.
+        const shortUrl = result.structuredContent?.short_url;
+        if (tool.ui === LINK_CARD_URI && !result.isError && typeof shortUrl === "string") {
+          const png = await qrPng(shortUrl, { fg: "#000000", bg: "#ffffff", caption: null }, 256);
+          result._meta = { qr_png: `data:image/png;base64,${Buffer.from(png).toString("base64")}` };
+        }
         console.log(JSON.stringify({ mcp: tool.name, service: caller.serviceId, ok: !result.isError }));
         // The log behind the admin AI page; a failed insert never fails the call.
         await sql`
