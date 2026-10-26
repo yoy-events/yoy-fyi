@@ -31,6 +31,9 @@ export function loadConfig(env = process.env) {
     safeBrowsingApiKey: env.SAFE_BROWSING_API_KEY || undefined,
     // Optional secret: the Telegram bot token from @BotFather. Set it on one stage only: the bot
     // has one webhook, and each start points it at this stage.
+    // Optional: the domain verification token from OpenAI's app submission, served at
+    // /.well-known/openai-apps-challenge. A public value, so it may live in deploy/prod.env.
+    openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE || undefined,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN || undefined,
   };
 }

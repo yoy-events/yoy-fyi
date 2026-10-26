@@ -121,3 +121,30 @@ describe("loadPosts", () => {
     expect(() => loadPosts(dir)).toThrow();
   });
 });
+
+describe("icon and domain verification", () => {
+  test.each([
+    ["/static/icon.svg", "image/svg+xml"],
+    ["/static/icon-512.png", "image/png"],
+    ["/static/icon-192.png", "image/png"],
+    ["/favicon.ico", "image/png"],
+  ])("%s is served as %s", async (path, type) => {
+    const res = await get(path);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe(type);
+    expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(100);
+  });
+
+  test("pages link the icon", async () => {
+    expect(await (await get("/blog/uk")).text()).toContain('rel="icon" href="/static/icon.svg"');
+  });
+
+  test("the OpenAI challenge is served only when configured", async () => {
+    expect((await get("/.well-known/openai-apps-challenge")).status).toBe(404);
+    const sql: SQL = await testDb();
+    const withToken = createApp({ sql, publicOrigin: ORIGIN, countryOf: () => null, openaiAppsChallenge: "tok_123" });
+    const res = await withToken.request(`${ORIGIN}/.well-known/openai-apps-challenge`);
+    expect(res.headers.get("content-type")).toStartWith("text/plain");
+    expect(await res.text()).toBe("tok_123");
+  });
+});
