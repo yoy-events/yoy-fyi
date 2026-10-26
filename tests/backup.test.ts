@@ -31,7 +31,7 @@ const run = async (env: Record<string, string>) => {
   const code = await proc.exited;
   return { code, out: await new Response(proc.stdout).text(), err: await new Response(proc.stderr).text() };
 };
-const R2 = { R2_BUCKET: "bk", R2_ACCOUNT_ID: "acct", R2_ACCESS_KEY_ID: "k", R2_SECRET_ACCESS_KEY: "s" };
+const R2 = { S3_BUCKET: "bk", S3_ENDPOINT: "https://s3.example.test", S3_KEY_ID: "k", S3_SECRET: "s" };
 const rcloneLog = () => readFileSync(join(dir, "rclone.log"), "utf8");
 
 describe("backup.sh", () => {
@@ -39,8 +39,8 @@ describe("backup.sh", () => {
     const r = await run(R2);
     expect(r.code).toBe(0);
     const day = new Date().toISOString().slice(0, 10);
-    expect(rcloneLog()).toContain(`r2:bk/yoy_fyi-${day}.sql.gz`);
-    expect(rcloneLog()).toContain("delete r2:bk --min-age 30d --include yoy_fyi-*.sql.gz");
+    expect(rcloneLog()).toContain(`remote:bk/yoy_fyi-${day}.sql.gz`);
+    expect(rcloneLog()).toContain("delete remote:bk --min-age 30d --include yoy_fyi-*.sql.gz");
     expect(r.out).toContain(`uploaded yoy_fyi-${day}.sql.gz`);
     const gunzip = Bun.spawnSync(["gzip", "-t", join(dir, "uploaded.gz")]);
     expect(gunzip.exitCode).toBe(0);
@@ -51,14 +51,14 @@ describe("backup.sh", () => {
     expect(rcloneLog()).toContain("--min-age 7d");
   });
 
-  test("without R2_BUCKET it only says backups are off", async () => {
+  test("without S3_BUCKET it only says backups are off", async () => {
     const r = await run({});
     expect(r.code).toBe(0);
     expect(r.out).toContain("backups are off");
     expect(() => rcloneLog()).toThrow();
   });
 
-  test.each(["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"])("a bucket without %s fails before dumping", async (missing) => {
+  test.each(["S3_ENDPOINT", "S3_KEY_ID", "S3_SECRET"])("a bucket without %s fails before dumping", async (missing) => {
     const env = { ...R2 } as Record<string, string>;
     delete env[missing];
     expect((await run(env)).code).not.toBe(0);

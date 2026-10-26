@@ -105,15 +105,17 @@ The runner has the single label `yoy-fyi`. To re-register it, get a registration
 
 ## Backups
 
-The `backup` service dumps the database daily to Cloudflare R2 (free up to 10 GB) as `yoy_fyi-YYYY-MM-DD.sql.gz`, one file per UTC day, and deletes files older than 30 days. It runs a first backup 30 seconds after every start and then at 03:00 UTC. It does nothing until `/etc/yoy-fyi/prod/backup.env` exists. Test does not need it.
+The `backup` service dumps the database daily to an S3-compatible bucket as `yoy_fyi-YYYY-MM-DD.sql.gz`, one file per UTC day, and deletes files older than 30 days. It runs a first backup 30 seconds after every start and then at 03:00 UTC. It does nothing until `/etc/yoy-fyi/prod/backup.env` exists. Test does not need it.
 
-Set up once:
+Where to keep them. Cloudflare R2 has a free tier (10 GB) but Cloudflare asks for a payment method and a $0 subscription before it turns R2 on. Backblaze B2 gives 10 GB free as well. Either works, the sidecar only needs an endpoint, a bucket and a key.
 
-1. In Cloudflare, R2 Object Storage: create a bucket (for example `yoy-fyi-backups`) and an API token with Object Read & Write limited to that bucket. R2 shows the access key and secret once.
-2. Put them on the VM without echoing them (the account id is on the R2 overview page, it is not secret):
+Set up once (R2 shown; for B2 use its S3 endpoint such as `https://s3.eu-central-003.backblazeb2.com`, and `S3_PROVIDER=Other`):
+
+1. Create a bucket (for example `yoy-fyi-backups`) and an access key limited to it with read and write. The provider shows the key and secret once.
+2. Put them on the VM without echoing them. The endpoint and bucket are not secret:
 
 ```bash
-ssh -t yoy-fyi-vm 'read -rsp "R2 access key id: " K; echo; read -rsp "R2 secret: " S; echo; printf "R2_ACCOUNT_ID=<account id>\nR2_BUCKET=yoy-fyi-backups\nR2_ACCESS_KEY_ID=%s\nR2_SECRET_ACCESS_KEY=%s\n" "$K" "$S" | sudo tee /etc/yoy-fyi/prod/backup.env >/dev/null && sudo chown root:runner /etc/yoy-fyi/prod/backup.env && sudo chmod 640 /etc/yoy-fyi/prod/backup.env'
+ssh -t yoy-fyi-vm 'read -rsp "key id: " K; echo; read -rsp "secret: " S; echo; printf "S3_ENDPOINT=https://<account id>.r2.cloudflarestorage.com\nS3_PROVIDER=Cloudflare\nS3_BUCKET=yoy-fyi-backups\nS3_KEY_ID=%s\nS3_SECRET=%s\n" "$K" "$S" | sudo tee /etc/yoy-fyi/prod/backup.env >/dev/null && sudo chown root:runner /etc/yoy-fyi/prod/backup.env && sudo chmod 640 /etc/yoy-fyi/prod/backup.env'
 ```
 
 3. The next deploy starts the sidecar. Check it with `docker logs yoy-fyi-backup-1`: a line `backup: uploaded yoy_fyi-<date>.sql.gz` means it works, `FAILED` means it did not.
@@ -122,7 +124,7 @@ Restore into an empty database (stop the app first, so nothing writes while you 
 
 ```bash
 docker exec -i yoy-fyi-postgres-1 psql -U yoy -d yoy_fyi -c 'drop schema public cascade; create schema public'
-rclone copyto r2:yoy-fyi-backups/yoy_fyi-2026-10-26.sql.gz - | gunzip | docker exec -i yoy-fyi-postgres-1 psql -U yoy -d yoy_fyi
+rclone copyto :s3,provider=Other,endpoint=<endpoint>,access_key_id=<id>,secret_access_key=<secret>:yoy-fyi-backups/yoy_fyi-2026-10-26.sql.gz - | gunzip | docker exec -i yoy-fyi-postgres-1 psql -U yoy -d yoy_fyi
 ```
 
 A backup that has never been restored is a guess: restore one into the test stack once after setting this up. The sidecar refuses to upload a dump under 1 KB or a corrupt gzip, so a broken run never replaces a good file from earlier the same day.
