@@ -1,0 +1,6 @@
+# The backup service of compose.prod.yml: pg_dump 17 and rclone (scripts/backup.sh).
+FROM postgres:17
+RUN apt-get update && apt-get install -y --no-install-recommends rclone ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY scripts/backup.sh /usr/local/bin/backup.sh
+USER postgres
+CMD ["/usr/local/bin/backup.sh"]

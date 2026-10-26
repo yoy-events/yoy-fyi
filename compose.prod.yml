@@ -36,6 +36,25 @@ services:
       retries: 6
       start_period: 10s
 
+  # Daily dump to Cloudflare R2. Off until /etc/yoy-fyi/<stage>/backup.env exists (docs/runbook.md).
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    image: yoy-fyi-backup:${STAGE:?}
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: yoy
+      PGDATABASE: yoy_fyi
+    env_file:
+      - /etc/yoy-fyi/${STAGE:?}/db.env # POSTGRES_PASSWORD
+      - path: /etc/yoy-fyi/${STAGE:?}/backup.env # R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   cloudflared:
     image: cloudflare/cloudflared:2026.9.3
     restart: unless-stopped
