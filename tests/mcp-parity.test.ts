@@ -162,3 +162,57 @@ test.each([
   expect(await sql`select 1 from bio_pages`).toHaveLength(0);
   expect(await sql`select 1 from links`).toHaveLength(0);
 });
+
+describe("MCP Apps views", () => {
+  const view = async (uri: string) => (await rpc("resources/read", { uri })).result.contents[0];
+
+  test("initialize advertises resources", async () => {
+    const { result } = await rpc("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "t", version: "1" } });
+    expect(result.capabilities).toEqual({ tools: {}, resources: {} });
+  });
+
+  test("resources/list names both views with the MCP Apps MIME type", async () => {
+    const { resources } = (await rpc("resources/list")).result;
+    expect(resources.map((r: { uri: string }) => r.uri).sort()).toEqual(["ui://yoy.fyi/clicks-chart-v1", "ui://yoy.fyi/link-card-v1"]);
+    for (const r of resources) expect(r.mimeType).toBe("text/html;profile=mcp-app");
+  });
+
+  test.each(["ui://yoy.fyi/link-card-v1", "ui://yoy.fyi/clicks-chart-v1"])("%s reads as a self-contained page that speaks the host protocol", async (uri) => {
+    const c = await view(uri);
+    expect(c.mimeType).toBe("text/html;profile=mcp-app");
+    for (const word of ["ui/initialize", "ui/notifications/initialized", "ui/notifications/tool-result", "<!doctype html>"]) expect(c.text).toContain(word);
+    // Nothing is loaded from the network, and server text is never parsed as HTML.
+    expect(c.text).not.toMatch(/https?:\/\/(?!www\.w3\.org)/);
+    expect(c.text).not.toContain("innerHTML");
+    expect(c._meta.ui).toMatchObject({ prefersBorder: true });
+    expect(c._meta.ui.csp).toBeUndefined();
+  });
+
+  test.each([["ui://yoy.fyi/nope"], [""], ["file:///etc/passwd"]])("reading %p is an error", async (uri) => {
+    expect((await rpc("resources/read", { uri })).error.message).toContain("Unknown resource");
+  });
+
+  test("tools that show a view name it in _meta.ui.resourceUri; the others do not", async () => {
+    const { tools } = (await rpc("tools/list")).result;
+    const uri = (n: string) => tools.find((t: { name: string }) => t.name === n)._meta?.ui?.resourceUri;
+    expect(uri("create_link")).toBe("ui://yoy.fyi/link-card-v1");
+    expect(uri("get_link")).toBe("ui://yoy.fyi/link-card-v1");
+    expect(uri("get_click_timeseries")).toBe("ui://yoy.fyi/clicks-chart-v1");
+    for (const n of ["list_links", "update_link", "get_qr", "whoami", "update_bio"]) expect(uri(n)).toBeUndefined();
+  });
+
+  test("create_link and get_link carry a small QR PNG in _meta, not in what the model sees", async () => {
+    const created = await make("https://example.com/card", { code: "card" });
+    expect(created._meta.qr_png).toMatch(/^data:image\/png;base64,/);
+    expect(created._meta.qr_png.length).toBeLessThan(20_000);
+    expect(JSON.stringify(created.content)).not.toContain("base64");
+    expect(JSON.stringify(created.structuredContent)).not.toContain("base64");
+    expect((await tool("get_link", { id: created.structuredContent.id }))._meta.qr_png).toMatch(/^data:image\/png/);
+  });
+
+  test("a failed create_link has no QR", async () => {
+    const failed = await make("ftp://nope");
+    expect(failed.isError).toBe(true);
+    expect(failed._meta).toBeUndefined();
+  });
+});
