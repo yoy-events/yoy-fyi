@@ -36,7 +36,7 @@ services:
       retries: 6
       start_period: 10s
 
-  # Daily dump to Cloudflare R2. Off until /etc/yoy-fyi/<stage>/backup.env exists (docs/runbook.md).
+  # Daily dump to an S3-compatible bucket. Off until /etc/yoy-fyi/<stage>/backup.env exists (docs/runbook.md).
   backup:
     build:
       context: .
@@ -49,7 +49,7 @@ services:
       PGDATABASE: yoy_fyi
     env_file:
       - /etc/yoy-fyi/${STAGE:?}/db.env # POSTGRES_PASSWORD
-      - path: /etc/yoy-fyi/${STAGE:?}/backup.env # R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
+      - path: /etc/yoy-fyi/${STAGE:?}/backup.env # S3_ENDPOINT, S3_BUCKET, S3_KEY_ID, S3_SECRET
         required: false
     depends_on:
       postgres:

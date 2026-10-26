@@ -65,7 +65,7 @@ None for now; a separate decision later.
 
 - Hosting costs $0 beyond the electricity and internet already paid for.
 - Every short link, including printed QR codes, is down whenever the machine, its power or its internet is down. A UPS for the PC and router reduces this.
-- Backups: first accepted as absent. Since 2026-10-26 a `backup` sidecar dumps the database daily to Cloudflare R2 (see the runbook); until its `backup.env` exists, losing the VM disk still loses every link and click.
+- Backups: first accepted as absent. Since 2026-10-26 a `backup` sidecar dumps the database daily to an S3-compatible bucket (see the runbook); until its `backup.env` exists, losing the VM disk still loses every link and click.
 - `docker` group membership is root-equivalent on the VM, and the test deploy shares that Docker daemon with production. Any branch pushed to this repo, including its workflow file, can therefore read production secrets and data. Accepted: only Roman has write access, fork PR workflows run only after Roman approves them, and the deploy job skips fork and bot PRs. Approving a fork PR's workflow run means running that code next to production, so review it first. A collaborator with write access, or automated PRs, would require a separate test VM first.
 - Moving the zone to Cloudflare touches records the current Fly app uses.
 - If the residential plan forbids servers, or uptime becomes a problem, the same compose file runs on any Linux VM; only the tunnel token changes.

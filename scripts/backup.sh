@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Daily backup of the yoy-fyi database to Cloudflare R2. Runs as the `backup` service of
-# compose.prod.yml, which sets PGHOST/PGUSER/PGDATABASE and the secrets from
-# /etc/yoy-fyi/<stage>/{db,backup}.env. Without R2_BUCKET it only logs that backups are off.
+# Daily backup of the yoy-fyi database to any S3-compatible bucket (Cloudflare R2, Backblaze B2,
+# MinIO...). Runs as the `backup` service of compose.prod.yml, which sets PGHOST/PGUSER/PGDATABASE
+# and the secrets from /etc/yoy-fyi/<stage>/{db,backup}.env: S3_ENDPOINT, S3_BUCKET, S3_KEY_ID,
+# S3_SECRET and optionally S3_PROVIDER (rclone's name, default Other). Without S3_BUCKET it only
+# logs that backups are off.
 #
 # One file per UTC day, yoy_fyi-YYYY-MM-DD.sql.gz: a later run the same day replaces it, and only
 # when pg_dump finished and the gzip is intact, so a failed run never overwrites a good backup.
@@ -10,19 +12,19 @@ set -euo pipefail
 
 log() { echo "backup: $*"; }
 
-if [ -z "${R2_BUCKET:-}" ]; then
-  log "R2_BUCKET is not set, backups are off"
+if [ -z "${S3_BUCKET:-}" ]; then
+  log "S3_BUCKET is not set, backups are off"
   [ -n "${BACKUP_ONCE:-}" ] && exit 0
   exec sleep infinity
 fi
 
 export PGPASSWORD="${PGPASSWORD:-${POSTGRES_PASSWORD:-}}"
-export RCLONE_CONFIG_R2_TYPE=s3
-export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
-export RCLONE_CONFIG_R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:?}"
-export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:?}"
-export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID:?}.r2.cloudflarestorage.com"
-export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
+export RCLONE_CONFIG_REMOTE_TYPE=s3
+export RCLONE_CONFIG_REMOTE_PROVIDER="${S3_PROVIDER:-Other}"
+export RCLONE_CONFIG_REMOTE_ACCESS_KEY_ID="${S3_KEY_ID:?}"
+export RCLONE_CONFIG_REMOTE_SECRET_ACCESS_KEY="${S3_SECRET:?}"
+export RCLONE_CONFIG_REMOTE_ENDPOINT="${S3_ENDPOINT:?}"
+export RCLONE_CONFIG_REMOTE_NO_CHECK_BUCKET=true
 
 KEEP_DAYS="${BACKUP_KEEP_DAYS:-30}"
 
@@ -35,8 +37,8 @@ backup_once() {
   gzip -t "$tmp"
   # A dump this small is an empty database or a failed dump, not a backup.
   [ "$(wc -c < "$tmp")" -gt 1024 ] || { log "dump is suspiciously small, not uploading"; return 1; }
-  rclone copyto "$tmp" "r2:${R2_BUCKET}/${name}"
-  rclone delete "r2:${R2_BUCKET}" --min-age "${KEEP_DAYS}d" --include "yoy_fyi-*.sql.gz"
+  rclone copyto "$tmp" "remote:${S3_BUCKET}/${name}"
+  rclone delete "remote:${S3_BUCKET}" --min-age "${KEEP_DAYS}d" --include "yoy_fyi-*.sql.gz"
   log "uploaded ${name} ($(wc -c < "$tmp" | tr -d " ") bytes)"
 }
 
