@@ -121,7 +121,7 @@ describe("transport and auth", () => {
 });
 
 describe("tools/list", () => {
-  test("lists the twelve tools with titles, schemas and explicit hints", async () => {
+  test("lists the thirteen tools with titles, schemas and explicit hints", async () => {
     const { tools } = (await rpc("tools/list")).result;
 
     expect(tools.map((t: { name: string }) => t.name).sort()).toEqual(
@@ -132,6 +132,7 @@ describe("tools/list", () => {
         "get_bio",
         "get_click_breakdown",
         "get_click_timeseries",
+        "get_conversions",
         "get_link",
         "get_qr",
         "list_links",

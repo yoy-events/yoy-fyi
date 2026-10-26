@@ -26,6 +26,7 @@ security:
 tags:
   - name: links
   - name: analytics
+  - name: conversions
   - name: keys
   - name: webhooks
 
@@ -304,6 +305,77 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Breakdown' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/conversions:
+    post:
+      tags: [conversions]
+      operationId: createConversion
+      summary: Report that a click led to a sign-up, a purchase or another event
+      description: |
+        Requires `conversions:write`. `click_id` is the `yoy_sid` that yoy.fyi appended to the
+        target URL of a link with `pass_click_id: true`; keep it from the landing page through
+        sign-up or checkout and send it back here. The conversion counts for that click's link.
+
+        `external_id` (your order or user id) makes a retry harmless: the same `external_id` with
+        the same body returns the existing conversion with 200; with a different body it is a
+        `conversion_conflict`. `value` and `currency` go together; sums are kept per currency.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConversionCreate' }
+      responses:
+        '201':
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversion' }
+        '200':
+          description: This `external_id` was already recorded with the same body.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`conversion_conflict`: the `external_id` was used for a different conversion.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/analytics/conversions:
+    get:
+      tags: [analytics]
+      operationId: getConversions
+      summary: Conversions per event, with value per currency
+      description: |
+        Requires `analytics:read`. Counts conversions by when they `occurred_at`. Range limit
+        400 days. Values are summed per currency, never across currencies.
+      parameters:
+        - $ref: '#/components/parameters/AnalyticsLinkId'
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          description: Exclusive.
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Totals
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConversionTotals' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -708,6 +780,7 @@ components:
                 - target_rejected
                 - code_reserved
                 - idempotency_key_reused
+                - conversion_conflict
                 - range_too_large
                 - scope_not_allowed
                 - rate_limited
@@ -722,6 +795,59 @@ components:
                 `unsafe` means Google Safe Browsing lists the link target).
               additionalProperties: true
 
+    ConversionCreate:
+      type: object
+      additionalProperties: false
+      required: [click_id, event]
+      properties:
+        click_id: { type: string, format: uuid, description: The `yoy_sid` of the click. }
+        event:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_.:-]{0,63}$'
+          examples: [signup, purchase]
+        value: { type: number, minimum: 0, maximum: 1000000000, description: Requires `currency`. }
+        currency: { type: string, pattern: '^[A-Za-z]{3}$', description: ISO 4217, stored upper-case. Requires `value`. }
+        external_id: { type: string, minLength: 1, maxLength: 128 }
+        occurred_at:
+          type: string
+          format: date-time
+          description: Default now. Not before the click, not in the future.
+
+    Conversion:
+      type: object
+      required: [id, click_id, link_id, event, value, currency, external_id, occurred_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        click_id: { type: string, format: uuid }
+        link_id: { type: string, format: uuid }
+        event: { type: string }
+        value: { type: [number, 'null'] }
+        currency: { type: [string, 'null'] }
+        external_id: { type: [string, 'null'] }
+        occurred_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+
+    ConversionTotals:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            type: object
+            required: [event, count, values]
+            properties:
+              event: { type: string }
+              count: { type: integer }
+              values:
+                type: array
+                items:
+                  type: object
+                  required: [currency, total]
+                  properties:
+                    currency: { type: string }
+                    total: { type: number }
+
     Code:
       type: string
       pattern: '^[A-Za-z0-9_-]{1,64}$'
@@ -733,7 +859,7 @@ components:
 
     Scope:
       type: string
-      enum: [links:write, links:read, analytics:read, keys:manage, webhooks:manage]
+      enum: [links:write, links:read, analytics:read, keys:manage, webhooks:manage, conversions:write]
 
     EventType:
       type: string

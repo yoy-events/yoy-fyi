@@ -32,9 +32,22 @@ const ok = await verifyWebhook(process.env.YOY_FYI_WEBHOOK_SECRET!, req.headers.
 
 Errors throw `YoyFyiError` with `status`, `code` and `details`, as described in the contract.
 
+### Conversions: which link brought the sign-ups and the money
+
+Create the link with `pass_click_id: true`. The redirect then appends `yoy_sid=<click id>` to the target URL. Keep that value from the landing page through sign-up or checkout (a cookie, or a hidden field), and report it when the event happens. The key needs the `conversions:write` scope.
+
+```ts
+await yoy.conversions.create({ click_id: sid, event: "purchase", value: 450, currency: "UAH", external_id: `order-${order.id}` });
+
+const totals = await yoy.analytics.conversions({ link_id: link.id, from: "2026-10-01T00:00:00Z", to: "2026-11-01T00:00:00Z" });
+// { events: [{ event: "purchase", count: 12, values: [{ currency: "UAH", total: 5400 }] }, ...] }
+```
+
+`external_id` makes a retry harmless: the same id with the same body returns the existing conversion, with a different body it is a `conversion_conflict`. Values are summed per currency, never across currencies. The link's page on yoy.fyi shows the last 30 days, and `get_conversions` shows them to an AI assistant.
+
 ## Use it from an AI agent (MCP)
 
-`https://yoy.fyi/mcp` is a remote MCP server with twelve tools: `whoami`, `list_links` (with text search), `get_link`, `create_link`, `create_links` (up to 20), `update_link`, `disable_link`, `get_qr` (a PNG image), `get_click_timeseries`, `get_click_breakdown`, and `get_bio` / `update_bio` for the yoy.fyi/@handle page of a personal account. They act for the service of the key you connect with. Links created this way are marked `created_via: "mcp"`.
+`https://yoy.fyi/mcp` is a remote MCP server with thirteen tools: `whoami`, `list_links` (with text search), `get_link`, `create_link`, `create_links` (up to 20), `update_link`, `disable_link`, `get_qr` (a PNG image), `get_click_timeseries`, `get_click_breakdown`, `get_conversions`, and `get_bio` / `update_bio` for the yoy.fyi/@handle page of a personal account. They act for the service of the key you connect with. Links created this way are marked `created_via: "mcp"`.
 
 In Claude Code, using a key with the scopes you want the agent to have:
 

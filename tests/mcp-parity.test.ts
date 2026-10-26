@@ -162,3 +162,16 @@ test.each([
   expect(await sql`select 1 from bio_pages`).toHaveLength(0);
   expect(await sql`select 1 from links`).toHaveLength(0);
 });
+
+test("get_conversions answers from /v1 with the analytics:read scope", async () => {
+  const to = new Date(Date.now() + 3600_000).toISOString().slice(0, 19) + "Z";
+  const from = new Date(Date.now() - 86_400_000).toISOString().slice(0, 19) + "Z";
+  const user = await upsertGoogleUser(sql, { sub: "g3", email: "carol@example.com", name: "Carol" }, new Date());
+  const [service] = await sql`select slug from services where owner_user_id = ${user!.id}`;
+  const { token: reader } = await issueKey(sql, { serviceSlug: service.slug, name: "r", scopes: ["analytics:read"] });
+  expect((await tool("get_conversions", { from, to }, reader)).structuredContent).toEqual({ events: [] });
+  expect((await tool("get_conversions", { from: "x", to }, reader)).isError).toBe(true);
+  expect((await tool("get_conversions", {}, reader)).isError).toBe(true);
+  // The default test key has no analytics:read.
+  expect((await tool("get_conversions", { from, to })).isError).toBe(true);
+});

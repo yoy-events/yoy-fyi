@@ -5,7 +5,7 @@ import type { AuthEnv } from "./auth";
 import { requireScope } from "./auth";
 import { apiError, decodeCursor, encodeCursor, isUuid, parseLimit, readJsonObject, validationFailed } from "./http";
 
-export const SCOPES = ["links:write", "links:read", "analytics:read", "keys:manage", "webhooks:manage"] as const;
+export const SCOPES = ["links:write", "links:read", "analytics:read", "keys:manage", "webhooks:manage", "conversions:write"] as const;
 export type Scope = (typeof SCOPES)[number];
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";

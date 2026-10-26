@@ -31,6 +31,31 @@ export type LinkUpdate = {
   expires_at?: string | null;
 };
 
+export type ConversionCreate = {
+  /** The yoy_sid yoy.fyi appended to the target URL of a link with pass_click_id. */
+  click_id: string;
+  /** For example signup or purchase. */
+  event: string;
+  /** Needs currency. */
+  value?: number;
+  currency?: string;
+  /** Your own id for the event (an order number): makes retries harmless. */
+  external_id?: string;
+  occurred_at?: string;
+};
+export type Conversion = {
+  id: string;
+  click_id: string;
+  link_id: string;
+  event: string;
+  value: number | null;
+  currency: string | null;
+  external_id: string | null;
+  occurred_at: string;
+  created_at: string;
+};
+export type ConversionTotals = { events: { event: string; count: number; values: { currency: string; total: number }[] }[] };
+
 export type Link = {
   id: string;
   code: string;
@@ -139,7 +164,12 @@ export function createClient({ apiKey, baseUrl = "https://yoy.fyi", fetch: fetch
       update: (id: string, body: LinkUpdate) => call<Link>("PATCH", `/v1/links/${encodeURIComponent(id)}`, { body }),
       disable: (id: string) => call<Link>("POST", `/v1/links/${encodeURIComponent(id)}/disable`),
     },
+    conversions: {
+      // The same external_id again returns the existing conversion, so retrying is safe.
+      create: (body: ConversionCreate) => call<Conversion>("POST", "/v1/conversions", { body }),
+    },
     analytics: {
+      conversions: (query: { from: string; to: string; link_id?: string }) => call<ConversionTotals>("GET", "/v1/analytics/conversions", { query }),
       timeseries: (query: AnalyticsScope & { interval: "hour" | "day" }) =>
         call<Timeseries>("GET", "/v1/analytics/timeseries", { query }),
       breakdown: (query: AnalyticsScope & { dimension: Dimension; limit?: number }) =>
