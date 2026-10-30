@@ -26,6 +26,8 @@ type M = {
   preview: { legend: string; title: string; description: string; image: string; imageHint: string };
   create: { paste: string; more: string; title: string; code: string; codeHint: string; tags: string; tagsHint: string; shorten: string };
   signInFirst: string;
+  // The pages a visitor of a short link sees when it doesn't exist or no longer works.
+  shortLink: { notFound: [string, string]; gone: [string, string] };
   home: {
     title: string;
     ready: string;
@@ -134,6 +136,15 @@ type M = {
   terms: { title: string; h1: string; paragraphs: string[]; contact: (email: string) => string };
 };
 
+export const LANG_COOKIE = "yfi_lang";
+const isLang = (v: unknown): v is Lang => typeof v === "string" && (["uk", "en", "es", "fr"] as const).includes(v as Lang);
+
+// The visitor's language: their choice (the yfi_lang cookie), else the browser's, else Ukrainian.
+export function pickLang(chosen: string | undefined, acceptLanguage: string | undefined): Lang {
+  const browser = (acceptLanguage ?? "").toLowerCase().slice(0, 2);
+  return isLang(chosen) ? chosen : isLang(browser) ? browser : "uk";
+}
+
 export const MESSAGES: Record<Lang, M> = {
   uk: {
     nav: { keys: "API-ключі", apps: "Підключені застосунки", bio: "Сторінка bio", signOut: "Вийти", blog: "Блог", privacy: "Конфіденційність", terms: "Умови", language: "Мова" },
@@ -193,6 +204,7 @@ export const MESSAGES: Record<Lang, M> = {
     preview: { legend: "Прев'ю в Telegram, Facebook та інших застосунках", title: "Назва прев'ю", description: "Опис прев'ю", image: "Адреса картинки прев'ю", imageHint: "https, від 1200×630" },
     create: { paste: "Вставте довге посилання", more: "Більше параметрів", title: "Назва", code: "Свій код", codeHint: "yoy.fyi/ваш-код", tags: "Теги", tagsHint: "через кому", shorten: "Скоротити" },
     signInFirst: "Спершу увійдіть",
+    shortLink: { notFound: ["Не знайдено", "Такого короткого посилання немає."], gone: ["Посилання більше не працює", "Це коротке посилання вимкнене або його термін дії минув."] },
     home: {
       title: "Мої посилання",
       ready: "Коротке посилання готове",
@@ -406,6 +418,7 @@ export const MESSAGES: Record<Lang, M> = {
     preview: { legend: "Preview in Telegram, Facebook and other apps", title: "Preview title", description: "Preview description", image: "Preview image address", imageHint: "https, 1200×630 or larger" },
     create: { paste: "Paste a long link", more: "More options", title: "Title", code: "Custom code", codeHint: "yoy.fyi/your-code", tags: "Tags", tagsHint: "comma-separated", shorten: "Shorten" },
     signInFirst: "Sign in first",
+    shortLink: { notFound: ["Not found", "This short link does not exist."], gone: ["Link no longer available", "This short link was disabled or has expired."] },
     home: {
       title: "My links",
       ready: "Your short link is ready",
@@ -619,6 +632,7 @@ export const MESSAGES: Record<Lang, M> = {
     preview: { legend: "Vista previa en Telegram, Facebook y otras aplicaciones", title: "Título de la vista previa", description: "Descripción de la vista previa", image: "Dirección de la imagen", imageHint: "https, 1200×630 o más" },
     create: { paste: "Pega un enlace largo", more: "Más opciones", title: "Título", code: "Código propio", codeHint: "yoy.fyi/tu-codigo", tags: "Etiquetas", tagsHint: "separadas por comas", shorten: "Acortar" },
     signInFirst: "Entra primero",
+    shortLink: { notFound: ["No encontrado", "Este enlace corto no existe."], gone: ["El enlace ya no funciona", "Este enlace corto se desactivó o caducó."] },
     home: {
       title: "Mis enlaces",
       ready: "Tu enlace corto está listo",
@@ -832,6 +846,7 @@ export const MESSAGES: Record<Lang, M> = {
     preview: { legend: "Aperçu dans Telegram, Facebook et d'autres applications", title: "Titre de l'aperçu", description: "Description de l'aperçu", image: "Adresse de l'image", imageHint: "https, 1200×630 ou plus" },
     create: { paste: "Collez un lien long", more: "Plus d'options", title: "Titre", code: "Code personnalisé", codeHint: "yoy.fyi/votre-code", tags: "Tags", tagsHint: "séparés par des virgules", shorten: "Raccourcir" },
     signInFirst: "Connectez-vous d'abord",
+    shortLink: { notFound: ["Introuvable", "Ce lien court n'existe pas."], gone: ["Lien indisponible", "Ce lien court a été désactivé ou a expiré."] },
     home: {
       title: "Mes liens",
       ready: "Votre lien court est prêt",

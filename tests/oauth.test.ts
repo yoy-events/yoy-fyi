@@ -179,6 +179,19 @@ describe("GET /oauth/authorize", () => {
     expect(Object.fromEntries(to.searchParams)).toMatchObject({ error, state: "st-1", iss: ORIGIN });
   });
 
+  test.each([
+    ["a javascript: redirect", "javascript:alert(document.cookie)"],
+    ["a data: redirect", "data:text/html,hi"],
+    ["a plain http redirect that is not loopback", "http://claude.ai/callback"],
+    ["a redirect with a fragment", "https://claude.ai/api/mcp/auth_callback#x"],
+  ])("%s declared in the client's own document is refused, with no redirect", async (_, uri) => {
+    metadata[CLIENT] = { ...metadata[CLIENT]!, redirect_uris: [REDIRECT, uri] };
+    const res = await get(`/oauth/authorize?${authorizeQuery({ redirect_uri: uri })}`);
+    metadata[CLIENT] = { ...metadata[CLIENT]!, redirect_uris: [REDIRECT, "http://localhost/callback"] };
+    expect(res.status).toBe(400);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
   test("a loopback redirect matches whatever port the client uses", async () => {
     const res = await get(`/oauth/authorize?${authorizeQuery({ redirect_uri: "http://localhost:53682/callback" })}`);
     expect(res.status).toBe(200);

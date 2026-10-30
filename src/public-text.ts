@@ -1,5 +1,6 @@
 // Text of the public landing page and the MCP setup guide in the four site languages.
-// Ukrainian lives at / and /docs/mcp; the others at /<lang> and /<lang>/docs/mcp.
+// Ukrainian lives at / and /docs/mcp; the others at /<lang> and /<lang>/docs/mcp. {mcp} stands
+// for the MCP address of the deployment (see withMcp in web.tsx).
 import type { Lang } from "./blog";
 
 type Steps = string[];
@@ -71,7 +72,7 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
       ["Це безкоштовно?", "Так. Потрібен лише Google-акаунт для входу."],
       [
         "Чи можна створити коротке посилання через ChatGPT або Claude?",
-        "Так. Підключіть yoy.fyi як конектор за адресою https://yoy.fyi/mcp, і асистент створюватиме справжні короткі посилання й QR-коди замість вигаданих адрес.",
+        "Так. Підключіть yoy.fyi як конектор за адресою {mcp}, і асистент створюватиме справжні короткі посилання й QR-коди замість вигаданих адрес.",
       ],
       ["Скільки живе коротке посилання?", "Поки ви його не вимкнете або поки не мине термін дії, якщо ви його задали. Код вимкненого посилання не отримає ніхто інший."],
       ["Що зберігається про людей, які клікають?", "Час, сайт-джерело, UTM-мітки, браузер, пристрій і країна. IP-адреса не зберігається."],
@@ -85,13 +86,13 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
         `yoy.fyi має MCP-сервер за адресою ${mcp}. Через нього асистент створює короткі посилання, показує QR-коди й статистику кліків. Посилання справжні й працюють одразу.`,
       claudeAi: [
         "Налаштування, розділ Connectors, Add custom connector.",
-        "Адреса: https://yoy.fyi/mcp, далі Connect.",
+        "Адреса: {mcp}, далі Connect.",
         "Увійдіть через Google і на сторінці дозволів поставте галочку для створення посилань, якщо хочете, щоб Claude їх створював.",
         "У чаті ввімкніть yoy.fyi через кнопку «+».",
       ],
       chatgpt: [
         "Settings, Apps & Connectors, Advanced, увімкніть Developer mode.",
-        "Створіть конектор з адресою https://yoy.fyi/mcp.",
+        "Створіть конектор з адресою {mcp}.",
         "Увійдіть через Google і дозвольте доступ. Доступність режиму залежить від тарифу ChatGPT.",
       ],
       claudeCodeAfter: "Потім у Claude Code виконайте /mcp, оберіть yoy-fyi й увійдіть через Google у браузері.",
@@ -147,7 +148,7 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
       ["Is it free?", "Yes. All you need is a Google account to sign in."],
       [
         "Can I create a short link from ChatGPT or Claude?",
-        "Yes. Connect yoy.fyi as a connector at https://yoy.fyi/mcp and the assistant will create real short links and QR codes instead of made-up addresses.",
+        "Yes. Connect yoy.fyi as a connector at {mcp} and the assistant will create real short links and QR codes instead of made-up addresses.",
       ],
       ["How long does a short link last?", "Until you disable it, or until the expiry date if you set one. A disabled code is never given to anyone else."],
       ["What is stored about people who click?", "The time, the referring site, UTM tags, browser, device and country. The IP address is not stored."],
@@ -161,13 +162,13 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
         `yoy.fyi has an MCP server at ${mcp}. Through it, an assistant creates short links and shows QR codes and click stats. The links are real and work right away.`,
       claudeAi: [
         "Settings, Connectors, Add custom connector.",
-        "Address: https://yoy.fyi/mcp, then Connect.",
+        "Address: {mcp}, then Connect.",
         "Sign in with Google. On the permissions page, tick link creation if you want Claude to create links.",
         "In a chat, turn yoy.fyi on from the + button.",
       ],
       chatgpt: [
         "Settings, Apps & Connectors, Advanced, turn on Developer mode.",
-        "Create a connector with the address https://yoy.fyi/mcp.",
+        "Create a connector with the address {mcp}.",
         "Sign in with Google and allow access. Developer mode depends on your ChatGPT plan.",
       ],
       claudeCodeAfter: "Then run /mcp in Claude Code, pick yoy-fyi and sign in with Google in the browser.",
@@ -223,7 +224,7 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
       ["¿Es gratis?", "Sí. Solo necesitas una cuenta de Google para entrar."],
       [
         "¿Puedo crear un enlace corto desde ChatGPT o Claude?",
-        "Sí. Conecta yoy.fyi como conector en https://yoy.fyi/mcp y el asistente creará enlaces cortos y códigos QR reales en lugar de direcciones inventadas.",
+        "Sí. Conecta yoy.fyi como conector en {mcp} y el asistente creará enlaces cortos y códigos QR reales en lugar de direcciones inventadas.",
       ],
       ["¿Cuánto dura un enlace corto?", "Hasta que lo desactives, o hasta la fecha de caducidad si la pusiste. Un código desactivado nunca se da a otra persona."],
       ["¿Qué se guarda de quien hace clic?", "La hora, el sitio de origen, las etiquetas UTM, el navegador, el dispositivo y el país. La dirección IP no se guarda."],
@@ -237,13 +238,13 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
         `yoy.fyi tiene un servidor MCP en ${mcp}. Con él, un asistente crea enlaces cortos y muestra códigos QR y estadísticas de clics. Los enlaces son reales y funcionan al instante.`,
       claudeAi: [
         "Configuración, Connectors, Add custom connector.",
-        "Dirección: https://yoy.fyi/mcp, luego Connect.",
+        "Dirección: {mcp}, luego Connect.",
         "Entra con Google. En la página de permisos, marca la creación de enlaces si quieres que Claude los cree.",
         "En un chat, activa yoy.fyi desde el botón +.",
       ],
       chatgpt: [
         "Settings, Apps & Connectors, Advanced, activa Developer mode.",
-        "Crea un conector con la dirección https://yoy.fyi/mcp.",
+        "Crea un conector con la dirección {mcp}.",
         "Entra con Google y permite el acceso. El modo desarrollador depende de tu plan de ChatGPT.",
       ],
       claudeCodeAfter: "Después ejecuta /mcp en Claude Code, elige yoy-fyi y entra con Google en el navegador.",
@@ -299,7 +300,7 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
       ["C'est gratuit ?", "Oui. Il suffit d'un compte Google pour se connecter."],
       [
         "Peut-on créer un lien court depuis ChatGPT ou Claude ?",
-        "Oui. Connectez yoy.fyi comme connecteur à l'adresse https://yoy.fyi/mcp et l'assistant créera de vrais liens courts et codes QR au lieu d'adresses inventées.",
+        "Oui. Connectez yoy.fyi comme connecteur à l'adresse {mcp} et l'assistant créera de vrais liens courts et codes QR au lieu d'adresses inventées.",
       ],
       ["Combien de temps dure un lien court ?", "Jusqu'à ce que vous le désactiviez, ou jusqu'à sa date d'expiration si vous en avez fixé une. Un code désactivé n'est jamais donné à quelqu'un d'autre."],
       ["Que garde-t-on des personnes qui cliquent ?", "L'heure, le site d'origine, les balises UTM, le navigateur, l'appareil et le pays. L'adresse IP n'est pas conservée."],
@@ -313,13 +314,13 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
         `yoy.fyi a un serveur MCP à l'adresse ${mcp}. Grâce à lui, un assistant crée des liens courts et affiche les codes QR et les statistiques de clics. Les liens sont réels et marchent tout de suite.`,
       claudeAi: [
         "Paramètres, Connectors, Add custom connector.",
-        "Adresse : https://yoy.fyi/mcp, puis Connect.",
+        "Adresse : {mcp}, puis Connect.",
         "Connectez-vous avec Google. Sur la page des autorisations, cochez la création de liens si vous voulez que Claude en crée.",
         "Dans une conversation, activez yoy.fyi avec le bouton +.",
       ],
       chatgpt: [
         "Settings, Apps & Connectors, Advanced, activez Developer mode.",
-        "Créez un connecteur avec l'adresse https://yoy.fyi/mcp.",
+        "Créez un connecteur avec l'adresse {mcp}.",
         "Connectez-vous avec Google et autorisez l'accès. Le mode développeur dépend de votre abonnement ChatGPT.",
       ],
       claudeCodeAfter: "Lancez ensuite /mcp dans Claude Code, choisissez yoy-fyi et connectez-vous avec Google dans le navigateur.",

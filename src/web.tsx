@@ -24,7 +24,7 @@ import { checkTarget } from "./target-policy";
 import { clientLabel } from "./oauth";
 import { issueConnectToken } from "./telegram";
 import { LANGS, type Lang } from "./blog";
-import { MESSAGES } from "./messages";
+import { LANG_COOKIE, MESSAGES, pickLang } from "./messages";
 import { PUBLIC_TEXT } from "./public-text";
 import { HANDLE, bioErrorText, getBio, saveBio } from "./bio";
 import { type User, clearUserSession, currentUser } from "./users";
@@ -47,8 +47,6 @@ function errorList(T: Msg, r: { code: string; message: string; details?: Record<
 
 type Msg = (typeof MESSAGES)[Lang];
 const qrErrorText = (T: Msg, code: QrError) => (code === "caption" ? T.qr.caption(40) : T.qr[code]);
-const LANG_COOKIE = "yfi_lang";
-const isLang = (v: unknown): v is Lang => typeof v === "string" && (LANGS as readonly string[]).includes(v);
 const langOf = (c: Context): Lang => (c.get("lang" as never) as Lang | undefined) ?? "uk";
 const tr = (c: Context): Msg => MESSAGES[langOf(c)];
 const langPath = (lang: Lang, path: string) => (lang === "uk" ? path || "/" : `/${lang}${path}`);
@@ -230,9 +228,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
 
   // The page language: the visitor's choice (cookie), else the browser's language, else Ukrainian.
   app.use(async (c, next) => {
-    const chosen = getCookie(c, LANG_COOKIE);
-    const browser = (c.req.header("accept-language") ?? "").toLowerCase().slice(0, 2);
-    c.set("lang", isLang(chosen) ? chosen : isLang(browser) ? browser : "uk");
+    c.set("lang", pickLang(getCookie(c, LANG_COOKIE), c.req.header("accept-language")));
     await next();
   });
 
@@ -374,6 +370,8 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   // The public landing page and the MCP guide in the site languages (see public-text.ts).
   const alternatesFor = (path: string) =>
     Object.fromEntries([...LANGS.map((l) => [l, `${publicOrigin}${langPath(l, path)}`]), ["x-default", `${publicOrigin}${path || "/"}`]]);
+  // The texts name the MCP server as {mcp}: this deployment's address, so test shows test's.
+  const withMcp = (text: string) => text.replaceAll("{mcp}", `${publicOrigin}/mcp`);
   const LangLinks = ({ lang, path }: { lang: Lang; path: string }) => (
     <p class="meta">
       {LANGS.filter((l) => l !== lang).map((l) => (
@@ -415,7 +413,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
             {
               "@type": "FAQPage",
               inLanguage: lang,
-              mainEntity: t.faq.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),
+              mainEntity: t.faq.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: withMcp(a) } })),
             },
           ],
         }}
@@ -448,7 +446,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         {t.faq.map(([q, a]) => (
           <>
             <h3>{q}</h3>
-            <p>{a}</p>
+            <p>{withMcp(a)}</p>
           </>
         ))}
         <p>
@@ -485,13 +483,13 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         <h2>claude.ai</h2>
         <ol>
           {t.claudeAi.map((s) => (
-            <li>{s}</li>
+            <li>{withMcp(s)}</li>
           ))}
         </ol>
         <h2>ChatGPT</h2>
         <ol>
           {t.chatgpt.map((s) => (
-            <li>{s}</li>
+            <li>{withMcp(s)}</li>
           ))}
         </ol>
         <h2>Claude Code</h2>

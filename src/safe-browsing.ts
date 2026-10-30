@@ -41,18 +41,19 @@ export function safeBrowsing(apiKey: string, post: (url: string, init: RequestIn
   };
 }
 
-// Takes down links whose target is now listed as unsafe: active ones, and ones only their owner
-// disabled (so the owner cannot simply enable them again). Returns how many it took down.
+// Takes down links whose target or preview image is now listed as unsafe: active ones, and ones
+// only their owner disabled (so the owner cannot simply enable them again). Returns how many.
 export async function rescanLinks(sql: SQL, unsafeUrls: UnsafeUrls, now: Date): Promise<number> {
-  const rows: { target_url: string }[] = await sql`
-    select distinct target_url from links
-    where (disabled_at is null or disabled_by = 'owner') and (expires_at is null or expires_at > ${now})`;
+  const rows: { url: string }[] = await sql`
+    select distinct u.url from links l
+    cross join lateral (values (l.target_url), (l.preview->>'image')) u(url)
+    where u.url is not null and (l.disabled_at is null or l.disabled_by = 'owner') and (l.expires_at is null or l.expires_at > ${now})`;
   if (rows.length === 0) return 0;
-  const unsafe = [...(await unsafeUrls(rows.map((r) => r.target_url)))];
+  const unsafe = [...(await unsafeUrls(rows.map((r) => r.url)))];
   if (unsafe.length === 0) return 0;
   const disabled = await sql`
     update links set disabled_at = coalesce(disabled_at, ${now}), disabled_by = 'safe_browsing', updated_at = ${now}
-    where (disabled_at is null or disabled_by = 'owner') and target_url in ${sql(unsafe)}
+    where (disabled_at is null or disabled_by = 'owner') and (target_url in ${sql(unsafe)} or preview->>'image' in ${sql(unsafe)})
     returning id, code, target_url`;
   for (const l of disabled) console.warn("link disabled: unsafe target", { id: l.id, code: l.code, target_url: l.target_url });
   return disabled.length;

@@ -97,6 +97,28 @@ test("GET /health is not treated as a code", async () => {
   expect(await res.json()).toEqual({ ok: true });
 });
 
+describe("not found and gone pages", () => {
+  test.each([
+    ["no preference", {}, "uk", "Не знайдено"],
+    ["an English browser", { "accept-language": "en-GB,en;q=0.9" }, "en", "Not found"],
+    ["a French cookie over an English browser", { "accept-language": "en", cookie: "yfi_lang=fr" }, "fr", "Introuvable"],
+    ["an unknown language", { "accept-language": "de-DE" }, "uk", "Не знайдено"],
+  ])("an unknown code with %s answers in %s", async (_, headers, lang, title) => {
+    const res = await get("/nope", headers as Record<string, string>);
+    const html = await res.text();
+    expect(res.status).toBe(404);
+    expect(html).toContain(`<html lang="${lang}">`);
+    expect(html).toContain(`<h1>${title}</h1>`);
+  });
+
+  test("a disabled link answers 410 in the visitor's language", async () => {
+    await createLink(sql, serviceId, { code: "off", target_url: "https://example.com/", disabled_at: new Date() });
+    const res = await get("/off", { "accept-language": "es" });
+    expect(res.status).toBe(410);
+    expect(await res.text()).toContain('<html lang="es">');
+  });
+});
+
 describe("protection", () => {
   test("rate-limits redirects per client IP and records nothing once limited", async () => {
     await createLink(sql, serviceId, { code: "rl", target_url: "https://example.com/" });
@@ -117,6 +139,14 @@ describe("protection", () => {
 
     const [{ count }] = await sql`select count(*)::int as count from clicks`;
     expect(count).toBe(3);
+  });
+
+  test("the limit applies before the database: unknown codes count too, and a limited visitor gets 429 not 404", async () => {
+    const limited = createApp({ sql, publicOrigin: "https://yoy.fyi", countryOf: () => null, redirectLimit: { perMinute: 120, burst: 2 } });
+    const hit = (code: string) => limited.request(`https://yoy.fyi/${code}`, {}, { ip: "203.0.113.9" });
+    expect((await hit("nope1")).status).toBe(404);
+    expect((await hit("nope2")).status).toBe(404);
+    expect((await hit("nope3")).status).toBe(429);
   });
 
   test("client-supplied IP headers do not change the rate-limit key", async () => {
