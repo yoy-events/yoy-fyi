@@ -46,5 +46,5 @@ export async function qrSvg(url: string, { fg, bg, caption }: QrStyle): Promise<
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size + 4}" shape-rendering="crispEdges"><rect width="${size}" height="${size + 4}" fill="${bg}"/>${inner}<text x="${size / 2}" y="${size + 1.5}" font-family="Helvetica, Arial, sans-serif" font-weight="700" font-size="${fontSize.toFixed(2)}" text-anchor="middle" fill="${fg}">${escapeXml(caption)}</text></svg>`;
 }
 
-export const qrPng = async (url: string, { fg, bg }: QrStyle) =>
-  new Uint8Array(await QRCode.toBuffer(url, { type: "png", width: 1024, margin: 2, color: { dark: fg, light: bg } }));
+export const qrPng = async (url: string, { fg, bg }: QrStyle, width = 1024) =>
+  new Uint8Array(await QRCode.toBuffer(url, { type: "png", width, margin: 2, color: { dark: fg, light: bg } }));

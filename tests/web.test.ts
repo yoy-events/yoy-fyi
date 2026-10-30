@@ -387,6 +387,10 @@ describe("landing and docs for search engines and AI", () => {
     expect(html).toContain(`${ORIGIN}/mcp`);
   });
 
+  test("pages link the icon", async () => {
+    expect(await (await get("/")).text()).toContain('rel="icon" href="/static/icon.svg"');
+  });
+
   test("/docs/mcp explains every client, signed in or not", async () => {
     const res = await get("/docs/mcp");
     const html = await res.text();

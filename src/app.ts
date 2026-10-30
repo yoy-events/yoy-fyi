@@ -36,6 +36,8 @@ export type AppDeps = {
   mcpLimit?: RateLimit;
   // The Telegram bot; without it there is no webhook and no Telegram account page.
   telegram?: TelegramConfig;
+  // The token OpenAI gives for domain verification when an app is submitted; not served when unset.
+  openaiAppsChallenge?: string;
   // False outside production: robots.txt disallows everything and every response says noindex.
   indexable?: boolean;
   // Blog posts; the ones in content/blog by default.
@@ -89,6 +91,7 @@ export function createApp({
   telegram,
   posts = POSTS,
   indexable = true,
+  openaiAppsChallenge,
   countryOf,
   recordClick,
   now = () => new Date(),
@@ -135,6 +138,18 @@ export function createApp({
   app.get("/static/copy.js", (c) =>
     c.body(copyJs.stream(), 200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600" }),
   );
+  // The icon of the service: browser tabs and the connector directories.
+  for (const [path, file, type] of [
+    ["/static/icon.svg", "icon.svg", "image/svg+xml"],
+    ["/static/icon-512.png", "icon-512.png", "image/png"],
+    ["/static/icon-192.png", "icon-192.png", "image/png"],
+    ["/favicon.ico", "icon-48.png", "image/png"],
+  ] as const) {
+    const icon = Bun.file(new URL(`./static/${file}`, import.meta.url).pathname);
+    app.get(path, (c) => c.body(icon.stream(), 200, { "Content-Type": type, "Cache-Control": "public, max-age=86400" }));
+  }
+  // OpenAI's app review asks for a token served as plain text here to prove the domain is ours.
+  if (openaiAppsChallenge) app.get("/.well-known/openai-apps-challenge", (c) => c.text(openaiAppsChallenge, 200, { "Content-Type": "text/plain; charset=utf-8" }));
   app.get("/static/admin.css", (c) =>
     c.body(adminCss.stream(), 200, { "Content-Type": "text/css; charset=utf-8", "Cache-Control": "public, max-age=3600" }),
   );

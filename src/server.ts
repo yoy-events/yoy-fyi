@@ -63,6 +63,7 @@ const app = createApp({
   unsafeUrls,
   telegram,
   indexable: config.indexable,
+  openaiAppsChallenge: config.openaiAppsChallenge,
   admin: {
     email: config.adminEmail,
     sessionSecret: config.sessionSecret,

@@ -130,3 +130,8 @@ The CI smoke step checks that an unauthenticated `POST /mcp` answers with the `W
 
 - Client ID Metadata Documents are accepted from any https host. Hosts on the known list (claude.ai, claude.com, anthropic.com, chatgpt.com, openai.com) are shown as known apps; any other host is marked on the consent page as unverified, with its domain. Claude Code uses `https://claude.ai/oauth/claude-code-client-metadata` with localhost callbacks.
 - `POST /oauth/register` (RFC 7591) registers public clients without a metadata document, such as Cursor. Redirects must be https, http on localhost, or a private-use scheme (not javascript:, data:, file: and the like), without a fragment; at most 10; 10 registrations per hour per address. They get a `dcr_` client id, are always marked unverified, never get silent consent, and are deleted after a day if no connection used them.
+
+## Amendment (2026-10-26): MCP Apps views
+
+- `/mcp` serves two views through `resources/list` and `resources/read`: `ui://yoy.fyi/link-card-v1` (link, QR, Copy) and `ui://yoy.fyi/clicks-chart-v1`, as `text/html;profile=mcp-app`. `create_link` and `get_link` name the card, `get_click_timeseries` the chart, in `_meta.ui.resourceUri`. ChatGPT and Claude both implement this standard; other clients ignore the key and show the text result.
+- The views are single files with no network access (no `csp`), and show server text with `textContent` only. The card's QR is a 256 px PNG data URI in the result's `_meta`, which the model does not see. The resource URI is a cache key: any breaking change gets a new `-vN` URI.

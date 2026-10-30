@@ -93,6 +93,8 @@ function Page({
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <title>{title === "yoy.fyi" ? title : `${title} · yoy.fyi`}</title>
         <link rel="stylesheet" href="/static/admin.css" />
+        <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/favicon.ico" sizes="48x48" />
         {og && <meta property="og:title" content={og.title} />}
         {og?.description && <meta property="og:description" content={og.description} />}
         {og?.description && <meta name="description" content={og.description} />}
