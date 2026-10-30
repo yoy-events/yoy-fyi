@@ -622,7 +622,8 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     if (!limitImport(u.id).ok) return importPage(c, u, { error: T.importPage.tooMany }, 429);
     const form = await c.req.parseBody();
     const text = form.file instanceof File && form.file.size > 0 ? await form.file.text() : String(form.csv ?? "");
-    const parsed = parseCsv(text);
+    const lines: number[] = [];
+    const parsed = parseCsv(text, lines);
     if ("error" in parsed) return importPage(c, u, { error: T.csvUnclosed }, 422);
     if (parsed.length === 0) return importPage(c, u, { error: T.importPage.empty }, 422);
     const [header, ...rows] = parsed as [string[], ...string[][]];
@@ -637,9 +638,8 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     for (const [i, row] of rows.entries()) {
       const values = Object.fromEntries(columns.map((k, j) => [k, (row[j] ?? "").trim()]));
       const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, u.serviceId, linkBody(values), null, "web");
-      results.push(
-        result.kind === "error" ? { line: i + 2, error: errorList(T, result).join("; ") } : { line: i + 2, short_url: `${publicOrigin}/${result.row.code}` },
-      );
+      const line = lines[i + 1]!;
+      results.push(result.kind === "error" ? { line, error: errorList(T, result).join("; ") } : { line, short_url: `${publicOrigin}/${result.row.code}` });
     }
     return importPage(c, u, { results });
   });

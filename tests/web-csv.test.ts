@@ -82,6 +82,12 @@ describe("import", () => {
     expect((await links()).map((l: { code: string }) => l.code)).toEqual(["one"]);
   });
 
+  test("line numbers are the file's lines, counting blank lines and line breaks inside quotes", async () => {
+    const html = await (await importCsv('target_url,title\n\nhttps://example.com/a,"two\nlines"\nftp://example.com/x,\n\nftp://example.com/y,\n')).text();
+    const reported = [...html.matchAll(/Рядок (\d+):/g)].map((m) => m[1]);
+    expect(reported).toEqual(["3", "5", "7"]);
+  });
+
   test("a file upload works like pasting", async () => {
     const form = new FormData();
     form.append("file", new File(["target_url\nhttps://example.com/f\n"], "links.csv", { type: "text/csv" }));

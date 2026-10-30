@@ -15,6 +15,17 @@ describe("parseCsv", () => {
     expect(parseCsv(text)).toEqual(rows);
   });
 
+  test.each([
+    ["plain rows", "a\n1\n2", [1, 2, 3]],
+    ["blank lines and a CRLF", "a\r\n\r\n1\n\n2\n", [1, 3, 5]],
+    ["a line break inside quotes", 'a\n"x\ny"\n2', [1, 2, 4]],
+    ["nothing", "", []],
+  ])("with %s, each row's first line is noted", (_, text, lines) => {
+    const noted: number[] = [];
+    parseCsv(text, noted);
+    expect(noted).toEqual(lines);
+  });
+
   test("an unclosed quote is an error", () => {
     expect(parseCsv('a\n"open')).toEqual({ error: "У CSV не закрита лапка." });
   });
