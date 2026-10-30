@@ -81,6 +81,7 @@ describe("POST /v1/links", () => {
     ["target_url", { target_url: "" }],
     ["code", { target_url: "https://example.com/", code: "" }],
     ["tags", { target_url: "https://example.com/", tags: [""] }],
+    ["utm_defaults value", { target_url: "https://example.com/", utm_defaults: { utm_source: "" } }],
     ["external_ref", { target_url: "https://example.com/", external_ref: { service: "", entity_type: "", entity_id: "" } }],
   ])("empty: an empty %s returns 422", async (_, body) => {
     expect((await send("POST", "/v1/links", body)).status).toBe(422);
