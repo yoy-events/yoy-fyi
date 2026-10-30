@@ -75,7 +75,7 @@ describe("backup.sh", () => {
   // inside the function, so each step has to stop it on its own.
   const runFirstLoop = async () => {
     // The first sleep (30 s after start) returns at once; the one after the first run ends the script.
-    fake("sleep", `[ "$1" = 30 ] && exit 0; kill "$PPID"`);
+    fake("sleep", `[ "$1" = 30 ] && exit 0; kill -KILL "$PPID"`);
     const proc = Bun.spawn(["bash", SCRIPT], { env: { PATH: `${dir}/bin:${process.env.PATH}`, ...R2 }, stdout: "pipe", stderr: "pipe" });
     await proc.exited;
     return new Response(proc.stdout).text();
