@@ -1,9 +1,7 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { isUuid } from "../http";
-import { Layout } from "./layout";
-
-const when = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") : "never");
+import { Layout, when } from "./layout";
 
 type UserRow = { id: string; email: string; name: string | null; slug: string; links: number; created_at: Date; last_seen_at: Date | null; disabled_at: Date | null };
 

@@ -2,9 +2,7 @@ import type { SQL } from "bun";
 import { Hono } from "hono";
 import { isUuid } from "../http";
 import { clientLabel } from "../oauth";
-import { Layout } from "./layout";
-
-const when = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") : "never");
+import { Layout, when } from "./layout";
 
 type GrantRow = { id: string; client_id: string; client: string | null; service: string; scopes: string[]; created_at: Date; last_used_at: Date | null };
 

@@ -6,7 +6,7 @@ import { type LinkRow, createLink, toLink } from "../links";
 import { DIMENSIONS, type Dimension } from "../rollup";
 import type { UnsafeUrls } from "../safe-browsing";
 import { BarChart, Ranking } from "./charts";
-import { Layout } from "./layout";
+import { Errors, Layout } from "./layout";
 
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
@@ -56,13 +56,7 @@ export function LinkForm({ slug, values = {}, errors = [] }: { slug: string; val
   return (
     <form method="post" action={`/admin/services/${slug}/links`} class="stack card">
       <h2>New link</h2>
-      {errors.length > 0 && (
-        <ul class="errors">
-          {errors.map((e) => (
-            <li>{e}</li>
-          ))}
-        </ul>
-      )}
+      <Errors errors={errors} />
       <label>
         Target URL
         <input type="url" name="target_url" required value={values.target_url ?? ""} placeholder="https://" />

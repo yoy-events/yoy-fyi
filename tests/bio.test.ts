@@ -56,6 +56,14 @@ describe("editing the page", () => {
     expect(html).toContain('<meta property="og:title" content="Ann&#39;s links"/>');
   });
 
+  test("the form shows the saved page with its links ticked", async () => {
+    await save({ link: [ids.gig!] });
+    const html = await (await get("/account/bio")).text();
+    expect(html).toContain('value="ann"');
+    expect(html).toMatch(new RegExp(`value="${ids.gig}" checked`));
+    expect(html).not.toMatch(new RegExp(`value="${ids.talk}" checked`));
+  });
+
   test("the handle is lower-cased, and saving again updates the page", async () => {
     await save({ handle: "Ann" });
     await save({ handle: "ann", title: "New title" });

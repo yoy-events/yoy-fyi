@@ -9,6 +9,7 @@ import { raw } from "hono/html";
 import type { Child } from "hono/jsx";
 import { type AdminConfig, startGoogle } from "./admin/auth";
 import { BarChart, Ranking } from "./admin/charts";
+import { Errors, when } from "./admin/layout";
 import { linkBody, previewFrom } from "./admin/links";
 import { timeseries, breakdown } from "./analytics";
 import { isUuid } from "./http";
@@ -25,7 +26,7 @@ import { issueConnectToken } from "./telegram";
 import { LANGS, type Lang } from "./blog";
 import { MESSAGES } from "./messages";
 import { PUBLIC_TEXT } from "./public-text";
-import { HANDLE, bioErrorText, saveBio } from "./bio";
+import { HANDLE, bioErrorText, getBio, saveBio } from "./bio";
 import { type User, clearUserSession, currentUser } from "./users";
 
 const DAY = 86_400_000;
@@ -187,13 +188,7 @@ function CreateForm({ values = {}, errors = [], T }: { values?: Record<string, s
   const open = OPTIONAL.some((k) => values[k]);
   return (
     <form method="post" action="/links" class="stack card">
-      {errors.length > 0 && (
-        <ul class="errors">
-          {errors.map((e) => (
-            <li>{e}</li>
-          ))}
-        </ul>
-      )}
+      <Errors errors={errors} />
       <label>
         {T.create.paste}
         <input type="url" name="target_url" required value={values.target_url ?? ""} placeholder="https://" />
@@ -818,13 +813,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           <details open={!!form}>
             <summary>{T.link.edit}</summary>
             <form method="post" action={`/links/${link.id}`} class="stack card">
-              {form && form.errors.length > 0 && (
-                <ul class="errors">
-                  {form.errors.map((e) => (
-                    <li>{e}</li>
-                  ))}
-                </ul>
-              )}
+              <Errors errors={form?.errors} />
               <label>
                 {T.link.whereTo}
                 <input type="url" name="target_url" required value={values.target_url} />
@@ -951,13 +940,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         )}
         <form method="post" action="/account/keys" class="stack card">
           <h2>{T.keys.newKey}</h2>
-          {opts.errors && opts.errors.length > 0 && (
-            <ul class="errors">
-              {opts.errors.map((e) => (
-                <li>{e}</li>
-              ))}
-            </ul>
-          )}
+          <Errors errors={opts.errors} />
           <label>
             {T.keys.name}
             <input name="name" required maxlength={100} placeholder={T.keys.namePlaceholder} />
@@ -978,7 +961,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
               <li>
                 <strong>{k.name}</strong> <code>yfi_{k.prefix}_…</code>
                 <span class="meta">
-                  {k.scopes.join(", ")} · {T.keys.lastUsed} {k.last_used_at ? k.last_used_at.toISOString().slice(0, 16).replace("T", " ") : T.keys.never}
+                  {k.scopes.join(", ")} · {T.keys.lastUsed} {when(k.last_used_at, T.keys.never)}
                 </span>
                 <form method="post" action={`/account/keys/${k.id}/revoke`}>
                   <button type="submit" class="danger">
@@ -1029,7 +1012,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   // like any other visit to them.
   async function bioForm(c: Context, u: User, values?: { handle: string; title: string; description: string; link: string[] }, errors: string[] = []) {
     const T = tr(c);
-    const [page] = await sql`select * from bio_pages where user_id = ${u.id}`;
+    const page = await getBio(sql, u.id);
     const v = values ?? { handle: page?.handle ?? "", title: page?.title ?? "", description: page?.description ?? "", link: page?.link_ids ?? [] };
     const links: LinkRow[] = await sql`select * from links where service_id = ${u.serviceId} and disabled_at is null order by id desc limit 200`;
     return c.html(
@@ -1037,13 +1020,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         <h1>{T.bioPage.title}</h1>
         <p>{T.bioPage.intro}{page && <> : <a href={`/@${page.handle}`}>{`${publicOrigin}/@${page.handle}`}</a></>}.</p>
         <form method="post" action="/account/bio" class="stack card">
-          {errors.length > 0 && (
-            <ul class="errors">
-              {errors.map((e) => (
-                <li>{e}</li>
-              ))}
-            </ul>
-          )}
+          <Errors errors={errors} />
           <label>
             {T.bioPage.address} <span class="meta">{publicOrigin}/@…, {T.bioPage.addressHint}</span>
             <input name="handle" required maxlength={30} value={v.handle} />
@@ -1173,7 +1150,6 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         and g.created_at > ${new Date(now().getTime() - 90 * DAY)}
       order by g.created_at desc`;
     const T = tr(c);
-    const when = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") : T.apps.never);
     return c.html(
       <Page title={T.apps.title} user={u} bot={telegramBot} lang={langOf(c)}>
         <h1>{T.apps.title}</h1>
@@ -1195,7 +1171,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
               <li>
                 <strong>{clientLabel(g.client_id, g.client)}</strong>
                 <span class="meta">
-                  {g.scopes.join(", ")} · {T.apps.connected} {when(g.created_at)} · {T.apps.lastUsed} {when(g.last_used_at)}
+                  {g.scopes.join(", ")} · {T.apps.connected} {when(g.created_at)} · {T.apps.lastUsed} {when(g.last_used_at, T.apps.never)}
                 </span>
                 <span class="meta">
                   {T.apps.calls30(g.calls)}
