@@ -122,6 +122,9 @@ describe("GET /v1/analytics/timeseries", () => {
     "interval=day&from=2026-03-11T00:00:00Z&to=2026-03-10T00:00:00Z",
     "interval=day&from=2026-03-10&to=2026-03-11T00:00:00Z",
     "interval=day&bots=maybe&from=2026-03-10T00:00:00Z&to=2026-03-11T00:00:00Z",
+    // RFC 3339 in shape but not a real date-time: month 13, hour 25.
+    "interval=day&from=2026-13-01T00:00:00Z&to=2026-03-11T00:00:00Z",
+    "interval=hour&from=2026-03-10T00:00:00Z&to=2026-03-10T25:00:00Z",
   ])("rejects %s with 400", async (query) => {
     const res = await get(`/v1/analytics/timeseries?${query}`);
 
@@ -205,6 +208,7 @@ describe("GET /v1/analytics/breakdown", () => {
     "dimension=ip&from=2026-03-10T00:00:00Z&to=2026-03-12T00:00:00Z",
     "dimension=country&limit=0&from=2026-03-10T00:00:00Z&to=2026-03-12T00:00:00Z",
     "dimension=country&limit=101&from=2026-03-10T00:00:00Z&to=2026-03-12T00:00:00Z",
+    "dimension=country&from=2026-13-10T00:00:00Z&to=2026-03-12T00:00:00Z",
   ])("rejects %s with 400", async (query) => {
     expect((await get(`/v1/analytics/breakdown?${query}`)).status).toBe(400);
   });

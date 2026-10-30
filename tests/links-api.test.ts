@@ -250,12 +250,16 @@ describe("create rate limit", () => {
     const ok = await post();
     expect(ok.headers.get("ratelimit-limit")).toBe("2");
     expect(ok.headers.get("ratelimit-remaining")).toBe("1");
+    // The contract promises RateLimit-Reset too: seconds until the quota is full again.
+    expect(ok.headers.get("ratelimit-reset")).toBe("1");
     await post();
     const res = await post();
 
     expect(res.status).toBe(429);
     expect(await errorCode(res)).toBe("rate_limited");
     expect(res.headers.get("retry-after")).toBe("1");
+    expect(res.headers.get("ratelimit-remaining")).toBe("0");
+    expect(res.headers.get("ratelimit-reset")).toBe("2");
   });
 
   test("the limit is per service, so extra keys do not raise it", async () => {

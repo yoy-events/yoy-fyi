@@ -8,6 +8,9 @@ FROM oven/bun:1.3.10-slim AS geoip
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY scripts/fetch-geoip.sh scripts/
+# The deploy passes the current month. A changed ARG invalidates the cached RUN below, so a new
+# month's build downloads again instead of keeping the database of whichever month first built it.
+ARG GEOIP_MONTH
 RUN bash scripts/fetch-geoip.sh data/dbip-country-lite.mmdb
 
 FROM oven/bun:1.3.10-slim

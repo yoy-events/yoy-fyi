@@ -10,7 +10,7 @@ export function createSaltSource(sql: SQL) {
     if (cached?.day === day) return cached.salt;
 
     const fresh = crypto.getRandomValues(new Uint8Array(32));
-    const [row] = await sql`
+    let [row] = await sql`
       with inserted as (
         insert into daily_salts (day, salt) values (${day}, ${fresh})
         on conflict (day) do nothing
@@ -20,6 +20,9 @@ export function createSaltSource(sql: SQL) {
       union all
       select salt from daily_salts where day = ${day}
       limit 1`;
+    // A concurrent insert of the same day that committed while this one waited on it is not in
+    // this statement's snapshot, so neither branch returned it. A new statement sees it.
+    row ??= (await sql`select salt from daily_salts where day = ${day}`)[0];
     await sql`delete from daily_salts where day < ${day}::date - 1`;
     cached = { day, salt: new Uint8Array(row.salt) };
     return cached.salt;

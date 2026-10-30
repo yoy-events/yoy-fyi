@@ -2,10 +2,9 @@ import type { SQL } from "bun";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { type AuthEnv, requireScope } from "./auth";
-import { apiError, isUuid } from "./http";
+import { apiError, isDateTime, isUuid } from "./http";
 import { DIMENSIONS, type Dimension } from "./rollup";
 
-const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 const TAG = /^[a-z0-9][a-z0-9_:.-]{0,39}$/;
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
@@ -20,8 +19,8 @@ async function parseScope(c: Context<AuthEnv>, sql: SQL, step: number, maxRange:
   const q = c.req.query();
   const bots = (q.bots ?? "exclude") as Bots;
   const valid =
-    RFC3339.test(q.from ?? "") &&
-    RFC3339.test(q.to ?? "") &&
+    isDateTime(q.from ?? "") &&
+    isDateTime(q.to ?? "") &&
     ["exclude", "include", "only"].includes(bots) &&
     (q.link_id === undefined || isUuid(q.link_id)) &&
     (q.tag === undefined || TAG.test(q.tag));
