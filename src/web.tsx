@@ -50,6 +50,17 @@ const LANG_COOKIE = "yfi_lang";
 const isLang = (v: unknown): v is Lang => typeof v === "string" && (LANGS as readonly string[]).includes(v);
 const langOf = (c: Context): Lang => (c.get("lang" as never) as Lang | undefined) ?? "uk";
 const tr = (c: Context): Msg => MESSAGES[langOf(c)];
+const langPath = (lang: Lang, path: string) => (lang === "uk" ? path || "/" : `/${lang}${path}`);
+
+// The same page in another language, for the pages whose language is in their address: the
+// landing page, the guide and the blog. Signed in, / is the home page in every language.
+function inLanguage(path: string, lang: Lang, signedIn: boolean): string | null {
+  const blog = /^\/blog\/(?:uk|en|es|fr)(\/.*)?$/.exec(path);
+  if (blog) return `/blog/${lang}${blog[1] ?? ""}`;
+  if (path === "/") return signedIn ? null : langPath(lang, "");
+  const page = /^(?:\/(?:en|es|fr))?(\/docs\/mcp)?$/.exec(path);
+  return page ? langPath(lang, page[1] ?? "") : null;
+}
 
 type Deps = {
   sql: SQL;
@@ -104,7 +115,7 @@ function Page({
         {jsonLd && <script type="application/ld+json">{raw(JSON.stringify(jsonLd).replace(/</g, "\\u003c"))}</script>}
         <script src="/static/copy.js" defer></script>
       </head>
-      <body>
+      <body data-copied={T.home.copied} data-copy-failed={T.home.copyFailed}>
         <header>
           <a href="/" class="brand">
             yoy.fyi
@@ -230,13 +241,17 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     await next();
   });
 
-  // Switching language keeps the visitor on the page they came from (same origin only).
-  app.get("/lang/:lang{(?:uk|en|es|fr)}", (c) => {
-    setCookie(c, LANG_COOKIE, c.req.param("lang"), { path: "/", maxAge: 365 * 86_400, sameSite: "Lax", secure: true, httpOnly: true });
+  // Switching language keeps the visitor on the page they came from (same origin only), in the
+  // chosen language when that page's language is in its address.
+  app.get("/lang/:lang{(?:uk|en|es|fr)}", async (c) => {
+    const lang = c.req.param("lang") as Lang;
+    setCookie(c, LANG_COOKIE, lang, { path: "/", maxAge: 365 * 86_400, sameSite: "Lax", secure: true, httpOnly: true });
     let back = "/";
     try {
       const ref = new URL(c.req.header("referer") ?? "");
-      if (ref.origin === publicOrigin && !ref.pathname.startsWith("//")) back = ref.pathname + ref.search;
+      if (ref.origin === publicOrigin && !ref.pathname.startsWith("//")) {
+        back = inLanguage(ref.pathname, lang, !!(await user(c))) ?? ref.pathname + ref.search;
+      }
     } catch {}
     return c.redirect(back, 303);
   });
@@ -362,7 +377,6 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   }
 
   // The public landing page and the MCP guide in the site languages (see public-text.ts).
-  const langPath = (lang: Lang, path: string) => (lang === "uk" ? path || "/" : `/${lang}${path}`);
   const alternatesFor = (path: string) =>
     Object.fromEntries([...LANGS.map((l) => [l, `${publicOrigin}${langPath(l, path)}`]), ["x-default", `${publicOrigin}${path || "/"}`]]);
   const LangLinks = ({ lang, path }: { lang: Lang; path: string }) => (
@@ -1084,7 +1098,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
       order by id desc`;
     const title = page.title ?? `@${page.handle}`;
     return c.html(
-      <Page title={title} og={{ title, description: page.description ?? undefined }}>
+      <Page title={title} og={{ title, description: page.description ?? undefined }} lang={langOf(c)}>
         <h1>{title}</h1>
         {page.description && <p>{page.description}</p>}
         <ul class="list">

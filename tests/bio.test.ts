@@ -132,6 +132,19 @@ describe("the public page", () => {
     expect(await (await get("/@ann", "")).text()).not.toContain("/gig");
   });
 
+  test.each([
+    ["en-GB,en;q=0.9", "en", "Privacy"],
+    ["fr-FR", "fr", "Confidentialité"],
+    ["de-DE", "uk", "Конфіденційність"],
+    ["", "uk", "Конфіденційність"],
+  ])("with Accept-Language %p the page frame is in %s", async (header, lang, privacy) => {
+    await save({});
+    const res = await app.request(`${ORIGIN}/@ann`, { headers: header ? { "accept-language": header } : {} });
+    const html = await res.text();
+    expect(html).toContain(`<html lang="${lang}">`);
+    expect(html).toContain(`<a href="/privacy">${privacy}</a>`);
+  });
+
   test.each(["/@nobody", "/@x", "/@"])("%s is 404", async (path) => {
     expect((await get(path, "")).status).toBe(404);
   });

@@ -30,6 +30,8 @@ type M = {
     ready: string;
     shortLink: string;
     copy: string;
+    copied: string;
+    copyFailed: string;
     qrFor: (url: string) => string;
     downloadQr: string;
     stats: string;
@@ -194,6 +196,8 @@ export const MESSAGES: Record<Lang, M> = {
       ready: "Коротке посилання готове",
       shortLink: "Коротке посилання",
       copy: "Копіювати",
+      copied: "Скопійовано",
+      copyFailed: "Виділіть і скопіюйте",
       qrFor: (url) => `QR-код для ${url}`,
       downloadQr: "Завантажити QR:",
       stats: "Статистика",
@@ -398,6 +402,8 @@ export const MESSAGES: Record<Lang, M> = {
       ready: "Your short link is ready",
       shortLink: "Short link",
       copy: "Copy",
+      copied: "Copied",
+      copyFailed: "Select and copy",
       qrFor: (url) => `QR code for ${url}`,
       downloadQr: "Download QR:",
       stats: "Stats",
@@ -602,6 +608,8 @@ export const MESSAGES: Record<Lang, M> = {
       ready: "Tu enlace corto está listo",
       shortLink: "Enlace corto",
       copy: "Copiar",
+      copied: "Copiado",
+      copyFailed: "Selecciona y copia",
       qrFor: (url) => `Código QR de ${url}`,
       downloadQr: "Descargar QR:",
       stats: "Estadísticas",
@@ -806,6 +814,8 @@ export const MESSAGES: Record<Lang, M> = {
       ready: "Votre lien court est prêt",
       shortLink: "Lien court",
       copy: "Copier",
+      copied: "Copié",
+      copyFailed: "Sélectionnez et copiez",
       qrFor: (url) => `Code QR de ${url}`,
       downloadQr: "Télécharger le QR :",
       stats: "Statistiques",

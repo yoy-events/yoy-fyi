@@ -204,6 +204,39 @@ describe("after creating", () => {
     expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
     expect(await page.text()).not.toMatch(/<script>(?!<\/script>)/);
   });
+
+  // Runs copy.js against a minimal document: one click on `label`, then its timer.
+  async function clickCopy(label: string, body: Record<string, string>, clipboard: () => Promise<void>) {
+    const handlers: Record<string, (e: unknown) => Promise<void> | void> = {};
+    const timers: (() => void)[] = [];
+    const document = {
+      body: { dataset: body },
+      addEventListener: (type: string, fn: (e: unknown) => void) => {
+        handlers[type] = fn;
+      },
+    };
+    const button = { textContent: label, dataset: { copy: "https://yoy.fyi/gig" } as Record<string, string>, closest: () => button };
+    new Function("document", "navigator", "setTimeout", await Bun.file(new URL("../src/admin/copy.js", import.meta.url).pathname).text())(document, { clipboard: { writeText: clipboard } }, (fn: () => void) => timers.push(fn));
+    await handlers.click!({ target: button });
+    const shown = button.textContent;
+    for (const fn of timers) fn();
+    return { shown, after: button.textContent };
+  }
+
+  test("the copy button says Copied in the page's language and gets its own label back", async () => {
+    const html = await (await get("/", `${(await signIn()).cookie}; yfi_lang=es`)).text();
+    const body = /<body data-copied="([^"]+)" data-copy-failed="([^"]+)">/.exec(html)!;
+    expect([body[1], body[2]]).toEqual(["Copiado", "Selecciona y copia"]);
+
+    const ok = await clickCopy("Copiar para Telegram", { copied: "Copiado", copyFailed: "Selecciona y copia" }, async () => {});
+    expect(ok).toEqual({ shown: "Copiado", after: "Copiar para Telegram" });
+    const failed = await clickCopy("Copiar", { copied: "Copiado", copyFailed: "Selecciona y copia" }, async () => Promise.reject(new Error("denied")));
+    expect(failed).toEqual({ shown: "Selecciona y copia", after: "Copiar" });
+  });
+
+  test("without translations (the admin pages) the copy button falls back to English", async () => {
+    expect(await clickCopy("Copy", {}, async () => {})).toEqual({ shown: "Copied", after: "Copy" });
+  });
 });
 
 describe("create form", () => {
@@ -484,6 +517,31 @@ describe("signed-in pages in the visitor's language", () => {
     expect(res.headers.get("set-cookie")).toContain("yfi_lang=en");
     const away = await app.request(`${ORIGIN}/lang/fr`, { headers: { referer: "https://evil.example/x" } });
     expect(away.headers.get("location")).toBe("/");
+  });
+
+  // The landing page, the guide and the blog take their language from the address, so the switch
+  // has to go to the same page in the chosen language, or nothing changes.
+  test.each([
+    ["/", "en", "/en"],
+    ["/en", "fr", "/fr"],
+    ["/fr", "uk", "/"],
+    ["/docs/mcp", "es", "/es/docs/mcp"],
+    ["/es/docs/mcp", "uk", "/docs/mcp"],
+    ["/blog/en", "uk", "/blog/uk"],
+    ["/blog/uk/some-post", "fr", "/blog/fr/some-post"],
+    ["/privacy", "en", "/privacy"],
+    ["/english", "fr", "/english"],
+    ["/blog", "en", "/blog"],
+  ])("switching from %s to %s goes to %s", async (from, lang, to) => {
+    const res = await app.request(`${ORIGIN}/lang/${lang}`, { headers: { referer: `${ORIGIN}${from}` } });
+    expect(res.headers.get("location")).toBe(to);
+    expect(res.headers.get("set-cookie")).toContain(`yfi_lang=${lang}`);
+  });
+
+  test("signed in, / is the home page in every language, so the switch stays there", async () => {
+    const { cookie } = await signIn();
+    const res = await app.request(`${ORIGIN}/lang/en`, { headers: { cookie, referer: `${ORIGIN}/?q=gig` } });
+    expect(res.headers.get("location")).toBe("/?q=gig");
   });
 
   test("an unknown language is not a switch", async () => {
