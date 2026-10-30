@@ -329,6 +329,30 @@ describe("link page", () => {
     expect((await get(`/links/${id}`)).headers.get("location")).toBe("/");
   });
 
+  test.each([
+    ["uk", "Найбільше кліків: 0", "Кліків немає."],
+    ["en", "Peak 0 clicks", "No clicks."],
+    ["es", "Máximo: 0 clics", "Sin clics."],
+    ["fr", "Pic : 0 clics", "Aucun clic."],
+  ])("the chart and rankings speak %s and show the real peak", async (lang, peak, empty) => {
+    const { cookie } = await signIn();
+    const { id } = await createVia(cookie, { target_url: "https://example.com/a" });
+    const html = await (await get(`/links/${id}`, `${cookie}; yfi_lang=${lang}`)).text();
+    expect(html).toContain(`<figcaption class="meta">${peak}</figcaption>`);
+    expect(html).toContain(`<p class="meta">${empty}</p>`);
+    if (lang !== "en") expect(html).not.toMatch(/Peak|No clicks| clicks</);
+  });
+
+  test("with clicks, the chart's bars are labelled in the page's language", async () => {
+    const { cookie } = await signIn();
+    const { id } = await createVia(cookie, { target_url: "https://example.com/a" });
+    const [{ service_id }] = await sql`select service_id from links where id = ${id}`;
+    await sql`insert into link_stats_daily (link_id, service_id, bucket, is_bot, clicks, uniques) values (${id}, ${service_id}, '2026-10-23', false, 3, 2)`;
+    const html = await (await get(`/links/${id}`, `${cookie}; yfi_lang=uk`)).text();
+    expect(html).toContain("<title>2026-10-23: кліків: 3</title>");
+    expect(html).toContain("Найбільше кліків: 3");
+  });
+
   test("disable turns the link off", async () => {
     const { cookie } = await signIn();
     const { id } = await createVia(cookie, { target_url: "https://example.com/a" });

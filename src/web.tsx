@@ -791,7 +791,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         <h2>
           {T.link.clicks30(daily.totals.clicks)} <span class="meta">{T.link.visitors(daily.totals.uniques_upper_bound)}</span>
         </h2>
-        <BarChart points={daily.points} label={(t) => t.toISOString().slice(0, 10)} />
+        <BarChart points={daily.points} label={(t) => t.toISOString().slice(0, 10)} text={T.chart} />
         <p class="meta">
           <a href={`/links/${link.id}/clicks.csv`}>{T.link.downloadClicks}</a>
         </p>
@@ -809,10 +809,10 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           </ul>
         )}
         <div class="rankings">
-          <Ranking title={T.link.referrers} items={referrers!.items} total={referrers!.total_clicks} />
-          <Ranking title={T.link.channelsRanking} items={channels!.items} total={channels!.total_clicks} />
-          <Ranking title={T.link.countries} items={countries!.items} total={countries!.total_clicks} />
-          <Ranking title={T.link.devices} items={devices!.items} total={devices!.total_clicks} />
+          <Ranking title={T.link.referrers} items={referrers!.items} total={referrers!.total_clicks} text={T.chart} />
+          <Ranking title={T.link.channelsRanking} items={channels!.items} total={channels!.total_clicks} text={T.chart} />
+          <Ranking title={T.link.countries} items={countries!.items} total={countries!.total_clicks} text={T.chart} />
+          <Ranking title={T.link.devices} items={devices!.items} total={devices!.total_clicks} text={T.chart} />
         </div>
         {link.status !== "disabled" && (
           <details open={!!form}>
