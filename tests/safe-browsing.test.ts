@@ -92,6 +92,14 @@ describe("rescanLinks", () => {
     expect((await sql`select disabled_by from links where id = ${bad}`)[0].disabled_by).toBe("safe_browsing");
   });
 
+  test("an unsafe preview image takes the link down too, even with a safe target", async () => {
+    const id = await createLink(sql, serviceId, { code: "pic", target_url: GOOD });
+    await sql`update links set preview = ${{ title: "T", image: BAD }} where id = ${id}`;
+    expect(await rescanLinks(sql, unsafeUrls, new Date())).toBe(1);
+    expect(asked.flat()).toContain(BAD);
+    expect((await sql`select disabled_by from links where id = ${id}`)[0].disabled_by).toBe("safe_browsing");
+  });
+
   test("with no links, asks nothing", async () => {
     expect(await rescanLinks(sql, unsafeUrls, new Date())).toBe(0);
     expect(asked).toEqual([]);

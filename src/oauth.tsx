@@ -77,7 +77,7 @@ function redirectAllowed(declared: string[], actual: string): boolean {
   });
 }
 
-// Schemes a registered client may not use as its redirect: they run code or read local data.
+// Schemes no client may use as its redirect: they run code or read local data.
 const FORBIDDEN_SCHEMES = new Set(["javascript:", "data:", "file:", "vbscript:", "blob:", "about:", "ws:", "wss:", "ftp:"]);
 function registrableRedirect(raw: string): boolean {
   if (raw.length > 512) return false;
@@ -366,7 +366,9 @@ export function oauthRoutes(deps: Deps) {
     const redirectUri = q.redirect_uri ?? "";
     const client = await loadClient(clientId, c.env?.ip);
     if (!client) return errorPage(c, "Не вдалося прочитати опис застосунку.");
-    if (!redirectUri || !redirectAllowed(client.redirect_uris, redirectUri)) return errorPage(c, "Адреса повернення не збігається з тією, яку оголосив застосунок.");
+    // The same rule as for self-registered clients: a client's own document can't make yoy.fyi send
+    // a code to javascript:, data:, plain http on the internet, or a URL with a fragment.
+    if (!redirectUri || !registrableRedirect(redirectUri) || !redirectAllowed(client.redirect_uris, redirectUri)) return errorPage(c, "Адреса повернення не збігається з тією, яку оголосив застосунок.");
 
     const fail = (error: string, description: string) =>
       c.redirect(withParams(redirectUri, { error, error_description: description, state: q.state, iss: publicOrigin }), 302);

@@ -522,3 +522,14 @@ describe("signed-in pages in the visitor's language", () => {
     for (const l of ["en", "es", "fr"]) expect(html).toContain(`href="/lang/${l}"`);
   });
 });
+
+test("the landing page and guide name this deployment's MCP address, not production's", async () => {
+  const { createApp } = await import("../src/app");
+  const { testAdmin } = await import("./helpers");
+  const staging = createApp({ sql, publicOrigin: "https://test.yoy.fyi", countryOf: () => null, admin: testAdmin().admin });
+  for (const path of ["/", "/en", "/docs/mcp", "/fr/docs/mcp"]) {
+    const html = await (await staging.request(`https://test.yoy.fyi${path}`)).text();
+    expect(html).toContain("https://test.yoy.fyi/mcp");
+    expect(html).not.toContain("https://yoy.fyi/mcp");
+  }
+});

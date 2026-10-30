@@ -1,5 +1,6 @@
 import type { SQL } from "bun";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
+import { getCookie } from "hono/cookie";
 import { secureHeaders } from "hono/secure-headers";
 import { type AdminConfig, adminRoutes } from "./admin";
 import { analyticsRoutes } from "./analytics";
@@ -11,6 +12,7 @@ import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
 import { keyRoutes } from "./keys";
 import { type Preview, linkRoutes } from "./links";
 import { mcpRoutes } from "./mcp";
+import { LANG_COOKIE, MESSAGES, pickLang } from "./messages";
 import { type TelegramConfig, telegramRoutes } from "./telegram";
 import { webRoutes } from "./web";
 import { type FetchClientMetadata, fetchClientMetadata, oauthRoutes } from "./oauth";
@@ -75,8 +77,12 @@ const previewPage = (preview: Preview, shortUrl: string, location: string) => {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(preview.title)}</title>${meta("og:title", preview.title)}${meta("og:description", preview.description)}${meta("og:image", preview.image)}${meta("og:url", shortUrl)}${meta("og:site_name", new URL(location).hostname)}<meta name="twitter:card" content="${preview.image ? "summary_large_image" : "summary"}"><meta http-equiv="refresh" content="0;url=${escapeHtml(location)}"></head><body><a href="${escapeHtml(location)}">${escapeHtml(preview.title)}</a></body></html>`;
 };
 
-const page = (title: string, body: string) =>
-  `<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body><h1>${title}</h1><p>${body}</p></body></html>`;
+// The page a visitor of a missing or dead short link sees, in their language.
+const page = (c: Context, which: "notFound" | "gone") => {
+  const lang = pickLang(getCookie(c, LANG_COOKIE), c.req.header("accept-language"));
+  const [title, body] = MESSAGES[lang].shortLink[which];
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body><h1>${title}</h1><p>${body}</p></body></html>`;
+};
 
 export function createApp({
   sql,
@@ -188,16 +194,9 @@ export function createApp({
 
   app.get("/:code", async (c) => {
     const code = c.req.param("code");
-    if (!CODE.test(code)) return c.html(page("Не знайдено", "Такого короткого посилання немає."), 404);
+    if (!CODE.test(code)) return c.html(page(c, "notFound"), 404);
 
-    // A blocked owner's service takes its links down too (ADR-0004).
-    const [link]: LinkRow[] = await sql`
-      select l.id, l.service_id, l.target_url, l.utm_defaults, l.preview, l.pass_click_id,
-             (l.disabled_at is not null or l.expires_at <= now() or s.disabled_at is not null) as gone
-      from links l join services s on s.id = l.service_id where l.code = ${code}`;
-    if (!link) return c.html(page("Не знайдено", "Такого короткого посилання немає."), 404);
-    if (link.gone) return c.html(page("Посилання більше не працює", "Це коротке посилання вимкнене або його термін дії минув."), 410);
-
+    // Limited before the lookup, so guessing codes costs the guesser and not the database.
     const ip = c.env?.ip ?? null;
     if (ip) {
       const limit = limitRedirect(rateLimitKey(ip));
@@ -206,6 +205,14 @@ export function createApp({
         return c.text("Too many requests", 429);
       }
     }
+
+    // A blocked owner's service takes its links down too (ADR-0004).
+    const [link]: LinkRow[] = await sql`
+      select l.id, l.service_id, l.target_url, l.utm_defaults, l.preview, l.pass_click_id,
+             (l.disabled_at is not null or l.expires_at <= now() or s.disabled_at is not null) as gone
+      from links l join services s on s.id = l.service_id where l.code = ${code}`;
+    if (!link) return c.html(page(c, "notFound"), 404);
+    if (link.gone) return c.html(page(c, "gone"), 410);
 
     const query = new URL(c.req.url).searchParams;
     const clickId = Bun.randomUUIDv7();
@@ -240,7 +247,7 @@ export function createApp({
     return c.redirect(location, 302);
   });
 
-  app.notFound((c) => c.html(page("Не знайдено", "Такого короткого посилання немає."), 404));
+  app.notFound((c) => c.html(page(c, "notFound"), 404));
 
   return app;
 }
