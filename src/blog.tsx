@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { raw } from "hono/html";
 import type { Child } from "hono/jsx";
 import { marked } from "marked";
+import { MESSAGES } from "./messages";
 
 export const LANGS = ["uk", "en", "es", "fr"] as const;
 export type Lang = (typeof LANGS)[number];
@@ -86,7 +87,8 @@ function Shell(props: { lang: Lang; title: string; description: string; canonica
         </header>
         <main>{props.children}</main>
         <footer class="meta">
-          <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/llms.txt">llms.txt</a>
+          <a href="/privacy">{MESSAGES[props.lang].nav.privacy}</a> · <a href="/terms">{MESSAGES[props.lang].nav.terms}</a> ·{" "}
+          <a href="/llms.txt">llms.txt</a>
         </footer>
       </body>
     </html>

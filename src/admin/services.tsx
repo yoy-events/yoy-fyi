@@ -1,24 +1,18 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
+import { isUuid } from "../http";
 import { SCOPES, type Scope, issueKey, toApiKey } from "../keys";
-import { Layout } from "./layout";
+import { Errors, Layout, when } from "./layout";
 import { LinkForm, LinkList } from "./links";
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-const when = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") : "never");
 
 function KeyForm({ service = "", errors = [] as string[] }) {
   return (
     <form method="post" action="/admin/keys" class="stack card">
       <h2>New API key</h2>
-      {errors.length > 0 && (
-        <ul class="errors">
-          {errors.map((e) => (
-            <li>{e}</li>
-          ))}
-        </ul>
-      )}
+      <Errors errors={errors} />
       <label>
         Service
         <input name="service" value={service} required pattern="[a-z0-9][a-z0-9-]{0,39}" placeholder="yoy" />
@@ -113,7 +107,7 @@ export function serviceRoutes(sql: SQL) {
 
   app.post("/keys/:id/revoke", async (c) => {
     const id = c.req.param("id");
-    const [row] = /^[0-9a-f-]{36}$/i.test(id)
+    const [row] = isUuid(id)
       ? await sql`
           update api_keys k set revoked_at = coalesce(k.revoked_at, now())
           from services s where k.id = ${id} and s.id = k.service_id

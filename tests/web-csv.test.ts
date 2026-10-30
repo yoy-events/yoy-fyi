@@ -1,40 +1,19 @@
 // Importing links from CSV and exporting links and clicks: valid, invalid and empty input.
 import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
-import { createApp } from "../src/app";
-import { addClick, reset, testAdmin, testDb } from "./helpers";
-
-const ORIGIN = "https://yoy.fyi";
-const CLIENT_ID = "123-test.apps.googleusercontent.com";
+import { addClick, reset, testDb } from "./helpers";
+import { ORIGIN, webApp } from "./web-helpers";
 
 let sql: SQL;
 let now: Date;
-let app: ReturnType<typeof createApp>;
-let claims: Record<string, unknown>;
+let web: ReturnType<typeof webApp>;
+let app: typeof web.app;
 let cookie: string;
 
-const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
-const cookies = (res: Response) =>
-  res.headers
-    .getSetCookie()
-    .map((c) => c.split(";")[0]!)
-    .filter((c) => !c.endsWith("="))
-    .join("; ");
-const get = (path: string, c = cookie) => app.request(`${ORIGIN}${path}`, { headers: c ? { cookie: c } : {} });
-const post = (path: string, fields: Record<string, string>, c = cookie, origin = ORIGIN) =>
-  app.request(`${ORIGIN}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", origin, cookie: c },
-    body: new URLSearchParams(fields).toString(),
-  });
+const get = (path: string, c = cookie) => web.get(path, c);
+const post = (path: string, fields: Record<string, string>, c = cookie, origin = ORIGIN) => web.post(path, fields, c, origin);
 const importCsv = (csv: string, c = cookie) => post("/links/import", { csv }, c);
-
-async function signIn(sub: string, email: string) {
-  const start = await get("/login/google", "");
-  const to = new URL(start.headers.get("location")!);
-  claims = { iss: "https://accounts.google.com", aud: CLIENT_ID, sub, email, email_verified: true, nonce: to.searchParams.get("nonce"), exp: now.getTime() / 1000 + 3600 };
-  return cookies(await get(`/admin/login/google/callback?code=c&state=${to.searchParams.get("state")}`, cookies(start)));
-}
+const signIn = async (sub: string, email: string) => (await web.signIn(sub, email)).cookie;
 
 const links = () => sql`select code, target_url, title, tags, created_via from links order by id`;
 
@@ -45,15 +24,8 @@ beforeAll(async () => {
 beforeEach(async () => {
   await reset(sql);
   now = new Date("2026-10-24T12:00:00Z");
-  const mail = testAdmin();
-  app = createApp({
-    sql,
-    publicOrigin: ORIGIN,
-    countryOf: () => null,
-    resolveHost: async () => ["93.184.215.14"],
-    now: () => now,
-    admin: { ...mail.admin, google: { clientId: CLIENT_ID, clientSecret: "s", exchange: async () => Response.json({ id_token: `${b64({})}.${b64(claims)}.sig` }) } },
-  });
+  web = webApp(sql, () => now);
+  app = web.app;
   cookie = await signIn("g-ann", "ann@example.com");
 });
 
@@ -80,6 +52,12 @@ describe("import", () => {
     expect(html).toContain("Рядок 3");
     expect(html).toContain("Рядок 4");
     expect((await links()).map((l: { code: string }) => l.code)).toEqual(["one"]);
+  });
+
+  test("line numbers are the file's lines, counting blank lines and line breaks inside quotes", async () => {
+    const html = await (await importCsv('target_url,title\n\nhttps://example.com/a,"two\nlines"\nftp://example.com/x,\n\nftp://example.com/y,\n')).text();
+    const reported = [...html.matchAll(/Рядок (\d+):/g)].map((m) => m[1]);
+    expect(reported).toEqual(["3", "5", "7"]);
   });
 
   test("a file upload works like pasting", async () => {

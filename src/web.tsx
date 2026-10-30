@@ -9,6 +9,7 @@ import { raw } from "hono/html";
 import type { Child } from "hono/jsx";
 import { type AdminConfig, startGoogle } from "./admin/auth";
 import { BarChart, Ranking } from "./admin/charts";
+import { Errors, when } from "./admin/layout";
 import { linkBody, previewFrom } from "./admin/links";
 import { timeseries, breakdown } from "./analytics";
 import { isUuid } from "./http";
@@ -25,7 +26,7 @@ import { issueConnectToken } from "./telegram";
 import { LANGS, type Lang } from "./blog";
 import { MESSAGES } from "./messages";
 import { PUBLIC_TEXT } from "./public-text";
-import { HANDLE, bioErrorText, saveBio } from "./bio";
+import { HANDLE, bioErrorText, getBio, saveBio } from "./bio";
 import { type User, clearUserSession, currentUser } from "./users";
 
 const DAY = 86_400_000;
@@ -50,6 +51,17 @@ const LANG_COOKIE = "yfi_lang";
 const isLang = (v: unknown): v is Lang => typeof v === "string" && (LANGS as readonly string[]).includes(v);
 const langOf = (c: Context): Lang => (c.get("lang" as never) as Lang | undefined) ?? "uk";
 const tr = (c: Context): Msg => MESSAGES[langOf(c)];
+const langPath = (lang: Lang, path: string) => (lang === "uk" ? path || "/" : `/${lang}${path}`);
+
+// The same page in another language, for the pages whose language is in their address: the
+// landing page, the guide and the blog. Signed in, / is the home page in every language.
+function inLanguage(path: string, lang: Lang, signedIn: boolean): string | null {
+  const blog = /^\/blog\/(?:uk|en|es|fr)(\/.*)?$/.exec(path);
+  if (blog) return `/blog/${lang}${blog[1] ?? ""}`;
+  if (path === "/") return signedIn ? null : langPath(lang, "");
+  const page = /^(?:\/(?:en|es|fr))?(\/docs\/mcp)?$/.exec(path);
+  return page ? langPath(lang, page[1] ?? "") : null;
+}
 
 type Deps = {
   sql: SQL;
@@ -104,7 +116,7 @@ function Page({
         {jsonLd && <script type="application/ld+json">{raw(JSON.stringify(jsonLd).replace(/</g, "\\u003c"))}</script>}
         <script src="/static/copy.js" defer></script>
       </head>
-      <body>
+      <body data-copied={T.home.copied} data-copy-failed={T.home.copyFailed}>
         <header>
           <a href="/" class="brand">
             yoy.fyi
@@ -176,13 +188,7 @@ function CreateForm({ values = {}, errors = [], T }: { values?: Record<string, s
   const open = OPTIONAL.some((k) => values[k]);
   return (
     <form method="post" action="/links" class="stack card">
-      {errors.length > 0 && (
-        <ul class="errors">
-          {errors.map((e) => (
-            <li>{e}</li>
-          ))}
-        </ul>
-      )}
+      <Errors errors={errors} />
       <label>
         {T.create.paste}
         <input type="url" name="target_url" required value={values.target_url ?? ""} placeholder="https://" />
@@ -230,13 +236,17 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     await next();
   });
 
-  // Switching language keeps the visitor on the page they came from (same origin only).
-  app.get("/lang/:lang{(?:uk|en|es|fr)}", (c) => {
-    setCookie(c, LANG_COOKIE, c.req.param("lang"), { path: "/", maxAge: 365 * 86_400, sameSite: "Lax", secure: true, httpOnly: true });
+  // Switching language keeps the visitor on the page they came from (same origin only), in the
+  // chosen language when that page's language is in its address.
+  app.get("/lang/:lang{(?:uk|en|es|fr)}", async (c) => {
+    const lang = c.req.param("lang") as Lang;
+    setCookie(c, LANG_COOKIE, lang, { path: "/", maxAge: 365 * 86_400, sameSite: "Lax", secure: true, httpOnly: true });
     let back = "/";
     try {
       const ref = new URL(c.req.header("referer") ?? "");
-      if (ref.origin === publicOrigin && !ref.pathname.startsWith("//")) back = ref.pathname + ref.search;
+      if (ref.origin === publicOrigin && !ref.pathname.startsWith("//")) {
+        back = inLanguage(ref.pathname, lang, !!(await user(c))) ?? ref.pathname + ref.search;
+      }
     } catch {}
     return c.redirect(back, 303);
   });
@@ -362,7 +372,6 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   }
 
   // The public landing page and the MCP guide in the site languages (see public-text.ts).
-  const langPath = (lang: Lang, path: string) => (lang === "uk" ? path || "/" : `/${lang}${path}`);
   const alternatesFor = (path: string) =>
     Object.fromEntries([...LANGS.map((l) => [l, `${publicOrigin}${langPath(l, path)}`]), ["x-default", `${publicOrigin}${path || "/"}`]]);
   const LangLinks = ({ lang, path }: { lang: Lang; path: string }) => (
@@ -608,7 +617,8 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     if (!limitImport(u.id).ok) return importPage(c, u, { error: T.importPage.tooMany }, 429);
     const form = await c.req.parseBody();
     const text = form.file instanceof File && form.file.size > 0 ? await form.file.text() : String(form.csv ?? "");
-    const parsed = parseCsv(text);
+    const lines: number[] = [];
+    const parsed = parseCsv(text, lines);
     if ("error" in parsed) return importPage(c, u, { error: T.csvUnclosed }, 422);
     if (parsed.length === 0) return importPage(c, u, { error: T.importPage.empty }, 422);
     const [header, ...rows] = parsed as [string[], ...string[][]];
@@ -623,9 +633,8 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     for (const [i, row] of rows.entries()) {
       const values = Object.fromEntries(columns.map((k, j) => [k, (row[j] ?? "").trim()]));
       const result = await createLink(sql, { ownHost, resolveHost, unsafeUrls }, u.serviceId, linkBody(values), null, "web");
-      results.push(
-        result.kind === "error" ? { line: i + 2, error: errorList(T, result).join("; ") } : { line: i + 2, short_url: `${publicOrigin}/${result.row.code}` },
-      );
+      const line = lines[i + 1]!;
+      results.push(result.kind === "error" ? { line, error: errorList(T, result).join("; ") } : { line, short_url: `${publicOrigin}/${result.row.code}` });
     }
     return importPage(c, u, { results });
   });
@@ -777,7 +786,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         <h2>
           {T.link.clicks30(daily.totals.clicks)} <span class="meta">{T.link.visitors(daily.totals.uniques_upper_bound)}</span>
         </h2>
-        <BarChart points={daily.points} label={(t) => t.toISOString().slice(0, 10)} />
+        <BarChart points={daily.points} label={(t) => t.toISOString().slice(0, 10)} text={T.chart} />
         <p class="meta">
           <a href={`/links/${link.id}/clicks.csv`}>{T.link.downloadClicks}</a>
         </p>
@@ -795,22 +804,16 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
           </ul>
         )}
         <div class="rankings">
-          <Ranking title={T.link.referrers} items={referrers!.items} total={referrers!.total_clicks} />
-          <Ranking title={T.link.channelsRanking} items={channels!.items} total={channels!.total_clicks} />
-          <Ranking title={T.link.countries} items={countries!.items} total={countries!.total_clicks} />
-          <Ranking title={T.link.devices} items={devices!.items} total={devices!.total_clicks} />
+          <Ranking title={T.link.referrers} items={referrers!.items} total={referrers!.total_clicks} text={T.chart} />
+          <Ranking title={T.link.channelsRanking} items={channels!.items} total={channels!.total_clicks} text={T.chart} />
+          <Ranking title={T.link.countries} items={countries!.items} total={countries!.total_clicks} text={T.chart} />
+          <Ranking title={T.link.devices} items={devices!.items} total={devices!.total_clicks} text={T.chart} />
         </div>
         {link.status !== "disabled" && (
           <details open={!!form}>
             <summary>{T.link.edit}</summary>
             <form method="post" action={`/links/${link.id}`} class="stack card">
-              {form && form.errors.length > 0 && (
-                <ul class="errors">
-                  {form.errors.map((e) => (
-                    <li>{e}</li>
-                  ))}
-                </ul>
-              )}
+              <Errors errors={form?.errors} />
               <label>
                 {T.link.whereTo}
                 <input type="url" name="target_url" required value={values.target_url} />
@@ -937,13 +940,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         )}
         <form method="post" action="/account/keys" class="stack card">
           <h2>{T.keys.newKey}</h2>
-          {opts.errors && opts.errors.length > 0 && (
-            <ul class="errors">
-              {opts.errors.map((e) => (
-                <li>{e}</li>
-              ))}
-            </ul>
-          )}
+          <Errors errors={opts.errors} />
           <label>
             {T.keys.name}
             <input name="name" required maxlength={100} placeholder={T.keys.namePlaceholder} />
@@ -964,7 +961,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
               <li>
                 <strong>{k.name}</strong> <code>yfi_{k.prefix}_…</code>
                 <span class="meta">
-                  {k.scopes.join(", ")} · {T.keys.lastUsed} {k.last_used_at ? k.last_used_at.toISOString().slice(0, 16).replace("T", " ") : T.keys.never}
+                  {k.scopes.join(", ")} · {T.keys.lastUsed} {when(k.last_used_at, T.keys.never)}
                 </span>
                 <form method="post" action={`/account/keys/${k.id}/revoke`}>
                   <button type="submit" class="danger">
@@ -1015,7 +1012,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   // like any other visit to them.
   async function bioForm(c: Context, u: User, values?: { handle: string; title: string; description: string; link: string[] }, errors: string[] = []) {
     const T = tr(c);
-    const [page] = await sql`select * from bio_pages where user_id = ${u.id}`;
+    const page = await getBio(sql, u.id);
     const v = values ?? { handle: page?.handle ?? "", title: page?.title ?? "", description: page?.description ?? "", link: page?.link_ids ?? [] };
     const links: LinkRow[] = await sql`select * from links where service_id = ${u.serviceId} and disabled_at is null order by id desc limit 200`;
     return c.html(
@@ -1023,13 +1020,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         <h1>{T.bioPage.title}</h1>
         <p>{T.bioPage.intro}{page && <> : <a href={`/@${page.handle}`}>{`${publicOrigin}/@${page.handle}`}</a></>}.</p>
         <form method="post" action="/account/bio" class="stack card">
-          {errors.length > 0 && (
-            <ul class="errors">
-              {errors.map((e) => (
-                <li>{e}</li>
-              ))}
-            </ul>
-          )}
+          <Errors errors={errors} />
           <label>
             {T.bioPage.address} <span class="meta">{publicOrigin}/@…, {T.bioPage.addressHint}</span>
             <input name="handle" required maxlength={30} value={v.handle} />
@@ -1084,7 +1075,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
       order by id desc`;
     const title = page.title ?? `@${page.handle}`;
     return c.html(
-      <Page title={title} og={{ title, description: page.description ?? undefined }}>
+      <Page title={title} og={{ title, description: page.description ?? undefined }} lang={langOf(c)}>
         <h1>{title}</h1>
         {page.description && <p>{page.description}</p>}
         <ul class="list">
@@ -1159,7 +1150,6 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         and g.created_at > ${new Date(now().getTime() - 90 * DAY)}
       order by g.created_at desc`;
     const T = tr(c);
-    const when = (d: Date | null) => (d ? d.toISOString().slice(0, 16).replace("T", " ") : T.apps.never);
     return c.html(
       <Page title={T.apps.title} user={u} bot={telegramBot} lang={langOf(c)}>
         <h1>{T.apps.title}</h1>
@@ -1181,7 +1171,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
               <li>
                 <strong>{clientLabel(g.client_id, g.client)}</strong>
                 <span class="meta">
-                  {g.scopes.join(", ")} · {T.apps.connected} {when(g.created_at)} · {T.apps.lastUsed} {when(g.last_used_at)}
+                  {g.scopes.join(", ")} · {T.apps.connected} {when(g.created_at)} · {T.apps.lastUsed} {when(g.last_used_at, T.apps.never)}
                 </span>
                 <span class="meta">
                   {T.apps.calls30(g.calls)}

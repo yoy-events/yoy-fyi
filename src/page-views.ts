@@ -53,7 +53,8 @@ export function countPageViews(sql: SQL, publicOrigin: string, now: () => Date):
   const ownHost = new URL(publicOrigin).hostname;
   return async (c, next) => {
     await next();
-    if (c.req.method !== "GET" || c.res.status >= 400 || !PUBLIC.test(c.req.path)) return;
+    // Redirects (/blog to /blog/<lang>) are counted at the page they lead to.
+    if (c.req.method !== "GET" || c.res.status >= 300 || !PUBLIC.test(c.req.path)) return;
     const host = refererHost(c.req.header("referer") ?? null);
     await sql`
       insert into page_views (id, at, path, referer_host, source, bot_name)

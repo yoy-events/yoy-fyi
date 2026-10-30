@@ -75,6 +75,13 @@ describe("counting", () => {
     expect(await views()).toEqual([]);
   });
 
+  // /blog only redirects to /blog/<lang>, which is counted when the browser follows it.
+  test("a redirect is not counted, so /blog then /blog/uk is one view", async () => {
+    expect((await visit("/blog", { "user-agent": CHROME })).status).toBe(302);
+    await visit("/blog/uk", { "user-agent": CHROME });
+    expect((await views()).map((v: { path: string }) => v.path)).toEqual(["/blog/uk"]);
+  });
+
   test("POSTs are not counted", async () => {
     await app.request(`${ORIGIN}/`, { method: "POST" });
     expect(await views()).toEqual([]);

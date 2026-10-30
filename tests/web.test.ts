@@ -1,37 +1,14 @@
 // The personal home page and account pages (ADR-0004): valid, invalid and empty input.
 import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
-import { type AppDeps, createApp } from "../src/app";
-import { reset, testAdmin, testDb } from "./helpers";
-
-const ORIGIN = "https://yoy.fyi";
-const CLIENT_ID = "123-test.apps.googleusercontent.com";
+import { reset, testDb } from "./helpers";
+import { ORIGIN, webApp } from "./web-helpers";
 
 let sql: SQL;
 let now: Date;
-let mail: ReturnType<typeof testAdmin>;
-let app: ReturnType<typeof createApp>;
-let claims: Record<string, unknown>;
-
-const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
-
-const build = (deps: Partial<AppDeps> = {}) =>
-  createApp({
-    sql,
-    publicOrigin: ORIGIN,
-    countryOf: () => null,
-    resolveHost: async () => ["93.184.215.14"],
-    now: () => now,
-    admin: {
-      ...mail.admin,
-      google: {
-        clientId: CLIENT_ID,
-        clientSecret: "s",
-        exchange: async () => Response.json({ id_token: `${b64url({ alg: "RS256" })}.${b64url(claims)}.sig` }),
-      },
-    },
-    ...deps,
-  });
+let web: ReturnType<typeof webApp>;
+let mail: typeof web.mail;
+let app: typeof web.app;
 
 beforeAll(async () => {
   sql = await testDb();
@@ -40,45 +17,13 @@ beforeAll(async () => {
 beforeEach(async () => {
   await reset(sql);
   now = new Date("2026-10-24T12:00:00Z");
-  mail = testAdmin();
-  app = build();
+  web = webApp(sql, () => now);
+  ({ mail, app } = web);
 });
 
-const cookies = (res: Response) =>
-  res.headers
-    .getSetCookie()
-    .map((c) => c.split(";")[0]!)
-    .filter((c) => !c.endsWith("="))
-    .join("; ");
-const get = (path: string, cookie = "") => app.request(`${ORIGIN}${path}`, { headers: cookie ? { cookie } : {} });
-const post = (path: string, fields: Record<string, string | string[]>, cookie: string, headers: Record<string, string> = {}) => {
-  const body = new URLSearchParams();
-  for (const [k, v] of Object.entries(fields)) for (const one of [v].flat()) body.append(k, one);
-  return app.request(`${ORIGIN}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN, cookie, ...headers },
-    body: body.toString(),
-  });
-};
-
-// Signs in through the real Google flow (with a fake token endpoint) and returns the session cookie.
-async function signIn(sub = "google-1", email = "ann@example.com", extra: Record<string, unknown> = {}) {
-  const start = await get("/login/google");
-  const to = new URL(start.headers.get("location")!);
-  claims = {
-    iss: "https://accounts.google.com",
-    aud: CLIENT_ID,
-    sub,
-    email,
-    email_verified: true,
-    name: "Ann",
-    nonce: to.searchParams.get("nonce"),
-    exp: now.getTime() / 1000 + 3600,
-    ...extra,
-  };
-  const res = await get(`/admin/login/google/callback?code=c&state=${to.searchParams.get("state")}`, cookies(start));
-  return { res, cookie: cookies(res) };
-}
+const get = (path: string, cookie = "") => web.get(path, cookie);
+const post = (path: string, fields: Record<string, string | string[]>, cookie: string, origin = ORIGIN) => web.post(path, fields, cookie, origin);
+const signIn = (sub?: string, email?: string, extra?: Record<string, unknown>) => web.signIn(sub, email, extra);
 
 async function createVia(cookie: string, fields: Record<string, string>) {
   const res = await post("/links", fields, cookie);
@@ -204,6 +149,39 @@ describe("after creating", () => {
     expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
     expect(await page.text()).not.toMatch(/<script>(?!<\/script>)/);
   });
+
+  // Runs copy.js against a minimal document: one click on `label`, then its timer.
+  async function clickCopy(label: string, body: Record<string, string>, clipboard: () => Promise<void>) {
+    const handlers: Record<string, (e: unknown) => Promise<void> | void> = {};
+    const timers: (() => void)[] = [];
+    const document = {
+      body: { dataset: body },
+      addEventListener: (type: string, fn: (e: unknown) => void) => {
+        handlers[type] = fn;
+      },
+    };
+    const button = { textContent: label, dataset: { copy: "https://yoy.fyi/gig" } as Record<string, string>, closest: () => button };
+    new Function("document", "navigator", "setTimeout", await Bun.file(new URL("../src/admin/copy.js", import.meta.url).pathname).text())(document, { clipboard: { writeText: clipboard } }, (fn: () => void) => timers.push(fn));
+    await handlers.click!({ target: button });
+    const shown = button.textContent;
+    for (const fn of timers) fn();
+    return { shown, after: button.textContent };
+  }
+
+  test("the copy button says Copied in the page's language and gets its own label back", async () => {
+    const html = await (await get("/", `${(await signIn()).cookie}; yfi_lang=es`)).text();
+    const body = /<body data-copied="([^"]+)" data-copy-failed="([^"]+)">/.exec(html)!;
+    expect([body[1], body[2]]).toEqual(["Copiado", "Selecciona y copia"]);
+
+    const ok = await clickCopy("Copiar para Telegram", { copied: "Copiado", copyFailed: "Selecciona y copia" }, async () => {});
+    expect(ok).toEqual({ shown: "Copiado", after: "Copiar para Telegram" });
+    const failed = await clickCopy("Copiar", { copied: "Copiado", copyFailed: "Selecciona y copia" }, async () => Promise.reject(new Error("denied")));
+    expect(failed).toEqual({ shown: "Selecciona y copia", after: "Copiar" });
+  });
+
+  test("without translations (the admin pages) the copy button falls back to English", async () => {
+    expect(await clickCopy("Copy", {}, async () => {})).toEqual({ shown: "Copied", after: "Copy" });
+  });
 });
 
 describe("create form", () => {
@@ -258,7 +236,7 @@ describe("POST /links", () => {
   test("needs a session and our own Origin", async () => {
     const { cookie } = await signIn();
     expect((await post("/links", { target_url: "https://example.com/" }, "")).status).toBe(401);
-    expect((await post("/links", { target_url: "https://example.com/" }, cookie, { origin: "https://evil.example" })).status).toBe(403);
+    expect((await post("/links", { target_url: "https://example.com/" }, cookie, "https://evil.example")).status).toBe(403);
   });
 
   test("allows 20 links an hour per user", async () => {
@@ -294,6 +272,30 @@ describe("link page", () => {
     expect((await post(`/links/${id}/disable`, {}, bob)).status).toBe(404);
     expect((await get("/links/not-a-uuid", ann)).status).toBe(404);
     expect((await get(`/links/${id}`)).headers.get("location")).toBe("/");
+  });
+
+  test.each([
+    ["uk", "Найбільше кліків: 0", "Кліків немає."],
+    ["en", "Peak 0 clicks", "No clicks."],
+    ["es", "Máximo: 0 clics", "Sin clics."],
+    ["fr", "Pic : 0 clics", "Aucun clic."],
+  ])("the chart and rankings speak %s and show the real peak", async (lang, peak, empty) => {
+    const { cookie } = await signIn();
+    const { id } = await createVia(cookie, { target_url: "https://example.com/a" });
+    const html = await (await get(`/links/${id}`, `${cookie}; yfi_lang=${lang}`)).text();
+    expect(html).toContain(`<figcaption class="meta">${peak}</figcaption>`);
+    expect(html).toContain(`<p class="meta">${empty}</p>`);
+    if (lang !== "en") expect(html).not.toMatch(/Peak|No clicks| clicks</);
+  });
+
+  test("with clicks, the chart's bars are labelled in the page's language", async () => {
+    const { cookie } = await signIn();
+    const { id } = await createVia(cookie, { target_url: "https://example.com/a" });
+    const [{ service_id }] = await sql`select service_id from links where id = ${id}`;
+    await sql`insert into link_stats_daily (link_id, service_id, bucket, is_bot, clicks, uniques) values (${id}, ${service_id}, '2026-10-23', false, 3, 2)`;
+    const html = await (await get(`/links/${id}`, `${cookie}; yfi_lang=uk`)).text();
+    expect(html).toContain("<title>2026-10-23: кліків: 3</title>");
+    expect(html).toContain("Найбільше кліків: 3");
   });
 
   test("disable turns the link off", async () => {
@@ -484,6 +486,31 @@ describe("signed-in pages in the visitor's language", () => {
     expect(res.headers.get("set-cookie")).toContain("yfi_lang=en");
     const away = await app.request(`${ORIGIN}/lang/fr`, { headers: { referer: "https://evil.example/x" } });
     expect(away.headers.get("location")).toBe("/");
+  });
+
+  // The landing page, the guide and the blog take their language from the address, so the switch
+  // has to go to the same page in the chosen language, or nothing changes.
+  test.each([
+    ["/", "en", "/en"],
+    ["/en", "fr", "/fr"],
+    ["/fr", "uk", "/"],
+    ["/docs/mcp", "es", "/es/docs/mcp"],
+    ["/es/docs/mcp", "uk", "/docs/mcp"],
+    ["/blog/en", "uk", "/blog/uk"],
+    ["/blog/uk/some-post", "fr", "/blog/fr/some-post"],
+    ["/privacy", "en", "/privacy"],
+    ["/english", "fr", "/english"],
+    ["/blog", "en", "/blog"],
+  ])("switching from %s to %s goes to %s", async (from, lang, to) => {
+    const res = await app.request(`${ORIGIN}/lang/${lang}`, { headers: { referer: `${ORIGIN}${from}` } });
+    expect(res.headers.get("location")).toBe(to);
+    expect(res.headers.get("set-cookie")).toContain(`yfi_lang=${lang}`);
+  });
+
+  test("signed in, / is the home page in every language, so the switch stays there", async () => {
+    const { cookie } = await signIn();
+    const res = await app.request(`${ORIGIN}/lang/en`, { headers: { cookie, referer: `${ORIGIN}/?q=gig` } });
+    expect(res.headers.get("location")).toBe("/?q=gig");
   });
 
   test("an unknown language is not a switch", async () => {

@@ -1,5 +1,6 @@
 // Text of the signed-in pages in the four site languages. Ukrainian is the default; a visitor's
 // choice is kept in a cookie (see web.tsx). The API, the admin and the Telegram bot stay as they are.
+import type { ChartText } from "./admin/charts";
 import type { Lang } from "./blog";
 
 type M = {
@@ -30,6 +31,8 @@ type M = {
     ready: string;
     shortLink: string;
     copy: string;
+    copied: string;
+    copyFailed: string;
     qrFor: (url: string) => string;
     downloadQr: string;
     stats: string;
@@ -97,6 +100,7 @@ type M = {
     byYoy: string;
     notAllowed: (reason: string) => string;
   };
+  chart: ChartText;
   keys: {
     title: string;
     intro: [string, string, string]; // before the API link, between, after the MCP address
@@ -194,6 +198,8 @@ export const MESSAGES: Record<Lang, M> = {
       ready: "Коротке посилання готове",
       shortLink: "Коротке посилання",
       copy: "Копіювати",
+      copied: "Скопійовано",
+      copyFailed: "Виділіть і скопіюйте",
       qrFor: (url) => `QR-код для ${url}`,
       downloadQr: "Завантажити QR:",
       stats: "Статистика",
@@ -260,6 +266,13 @@ export const MESSAGES: Record<Lang, M> = {
       cannotEnable: (why) => `Це посилання не можна увімкнути: ${why}.`,
       byYoy: "його вимкнув yoy.fyi",
       notAllowed: (reason) => `адреса не дозволена: ${reason}`,
+    },
+    chart: {
+      chart: (n) => `Стовпчикова діаграма, найбільше кліків: ${n}`,
+      peak: (n) => `Найбільше кліків: ${n}`,
+      clicks: (n) => `кліків: ${n}`,
+      none: "(немає)",
+      noClicks: "Кліків немає.",
     },
     keys: {
       title: "API-ключі",
@@ -398,6 +411,8 @@ export const MESSAGES: Record<Lang, M> = {
       ready: "Your short link is ready",
       shortLink: "Short link",
       copy: "Copy",
+      copied: "Copied",
+      copyFailed: "Select and copy",
       qrFor: (url) => `QR code for ${url}`,
       downloadQr: "Download QR:",
       stats: "Stats",
@@ -464,6 +479,13 @@ export const MESSAGES: Record<Lang, M> = {
       cannotEnable: (why) => `This link can't be enabled: ${why}.`,
       byYoy: "yoy.fyi disabled it",
       notAllowed: (reason) => `the address is not allowed: ${reason}`,
+    },
+    chart: {
+      chart: (n) => `Bar chart, peak ${n} clicks`,
+      peak: (n) => `Peak ${n} clicks`,
+      clicks: (n) => `${n} clicks`,
+      none: "(none)",
+      noClicks: "No clicks.",
     },
     keys: {
       title: "API keys",
@@ -602,6 +624,8 @@ export const MESSAGES: Record<Lang, M> = {
       ready: "Tu enlace corto está listo",
       shortLink: "Enlace corto",
       copy: "Copiar",
+      copied: "Copiado",
+      copyFailed: "Selecciona y copia",
       qrFor: (url) => `Código QR de ${url}`,
       downloadQr: "Descargar QR:",
       stats: "Estadísticas",
@@ -668,6 +692,13 @@ export const MESSAGES: Record<Lang, M> = {
       cannotEnable: (why) => `Este enlace no se puede activar: ${why}.`,
       byYoy: "lo desactivó yoy.fyi",
       notAllowed: (reason) => `la dirección no está permitida: ${reason}`,
+    },
+    chart: {
+      chart: (n) => `Gráfico de barras, máximo: ${n} clics`,
+      peak: (n) => `Máximo: ${n} clics`,
+      clicks: (n) => `${n} clics`,
+      none: "(ninguno)",
+      noClicks: "Sin clics.",
     },
     keys: {
       title: "Claves de API",
@@ -806,6 +837,8 @@ export const MESSAGES: Record<Lang, M> = {
       ready: "Votre lien court est prêt",
       shortLink: "Lien court",
       copy: "Copier",
+      copied: "Copié",
+      copyFailed: "Sélectionnez et copiez",
       qrFor: (url) => `Code QR de ${url}`,
       downloadQr: "Télécharger le QR :",
       stats: "Statistiques",
@@ -872,6 +905,13 @@ export const MESSAGES: Record<Lang, M> = {
       cannotEnable: (why) => `Ce lien ne peut pas être activé : ${why}.`,
       byYoy: "yoy.fyi l'a désactivé",
       notAllowed: (reason) => `l'adresse n'est pas autorisée : ${reason}`,
+    },
+    chart: {
+      chart: (n) => `Diagramme en barres, pic : ${n} clics`,
+      peak: (n) => `Pic : ${n} clics`,
+      clicks: (n) => `${n} clics`,
+      none: "(aucun)",
+      noClicks: "Aucun clic.",
     },
     keys: {
       title: "Clés d'API",

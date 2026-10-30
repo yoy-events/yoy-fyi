@@ -4,6 +4,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { SQL } from "bun";
 import { createApp } from "../src/app";
 import { LANGS, loadPosts } from "../src/blog";
+import { MESSAGES } from "../src/messages";
 import { testDb } from "./helpers";
 
 const ORIGIN = "https://yoy.fyi";
@@ -58,6 +59,15 @@ describe("blog pages", () => {
     expect(html).toContain('<meta property="og:title"');
     const ld = JSON.parse(/<script type="application\/ld\+json">(.*?)<\/script>/.exec(html)![1]!);
     expect(ld).toMatchObject({ "@type": "BlogPosting", headline: p.title, inLanguage: "en" });
+  });
+
+  test.each([...LANGS])("the %s index and posts link privacy and terms in that language", async (lang) => {
+    const p = posts.find((x) => x.lang === lang)!;
+    for (const path of [`/blog/${lang}`, `/blog/${lang}/${p.slug}`]) {
+      const html = await (await get(path)).text();
+      expect(html).toContain(`<a href="/privacy">${MESSAGES[lang].nav.privacy}</a>`);
+      expect(html).toContain(`<a href="/terms">${MESSAGES[lang].nav.terms}</a>`);
+    }
   });
 
   test("the blog pages may load the stylesheet", async () => {
