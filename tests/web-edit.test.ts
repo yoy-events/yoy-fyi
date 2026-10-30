@@ -242,3 +242,11 @@ describe("conversions on the link page", () => {
     expect(await sql`select scopes from api_keys where name = 'shop'`).toEqual([{ scopes: ["conversions:write", "analytics:read"] }]);
   });
 });
+
+test("a write without our Origin is refused even with no body (csrf() alone let it through)", async () => {
+  const res = await app.request(`${ORIGIN}/links/${id}/disable`, { method: "POST", headers: { cookie } });
+  expect(res.status).toBe(403);
+  const other = await app.request(`${ORIGIN}/links/${id}/disable`, { method: "POST", headers: { cookie, origin: "https://test.yoy.fyi" } });
+  expect(other.status).toBe(403);
+  expect((await link()).disabled_at).toBeNull();
+});

@@ -1019,9 +1019,9 @@ components:
         disabled_at: { type: [string, 'null'], format: date-time }
         created_via:
           type: string
-          enum: [api, admin, mcp, web, telegram]
+          enum: [api, admin, mcp, web, telegram, webmcp]
           readOnly: true
-          description: Where the link was created. `mcp` marks links created by AI agents over `/mcp`, `web` links created on the yoy.fyi home page, `telegram` links sent to the Telegram bot.
+          description: Where the link was created. `mcp` marks links created by AI agents over `/mcp`, `web` links created on the yoy.fyi home page, `telegram` links sent to the Telegram bot, `webmcp` links a browser's built-in agent created on yoy.fyi.
 
     Timeseries:
       type: object

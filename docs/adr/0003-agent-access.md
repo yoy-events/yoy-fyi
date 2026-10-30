@@ -135,3 +135,10 @@ The CI smoke step checks that an unauthenticated `POST /mcp` answers with the `W
 
 - `/mcp` serves two views through `resources/list` and `resources/read`: `ui://yoy.fyi/link-card-v1` (link, QR, Copy) and `ui://yoy.fyi/clicks-chart-v1`, as `text/html;profile=mcp-app`. `create_link` and `get_link` name the card, `get_click_timeseries` the chart, in `_meta.ui.resourceUri`. ChatGPT and Claude both implement this standard; other clients ignore the key and show the text result.
 - The views are single files with no network access (no `csp`), and show server text with `textContent` only. The card's QR is a 256 px PNG data URI in the result's `_meta`, which the model does not see. The resource URI is a cache key: any breaking change gets a new `-vN` URI.
+
+## Amendment (2026-10-30): WebMCP in the browser
+
+- Signed-in pages load `/static/webmcp.js`. Where the browser offers WebMCP (`document.modelContext`, experimental in Chrome in 2026), it registers `create_link`, `list_links`, `get_link` and `disable_link` for the browser's own agent; elsewhere it does nothing.
+- The tools call JSON endpoints under `/account/agent/*` with the user's session: same rules as the site's forms (own links only, the create form's 20-per-hour limit), links marked `created_via: "webmcp"`, calls logged in `mcp_calls` with client `webmcp`. Annotations: reads are `readOnlyHint`, `disable_link` is `consequentialHint`, results with user or external text are `untrustedContentHint`.
+- Every non-GET request on the site's own routes (web, admin, OAuth consent, agent) must carry our `Origin`. Hono's `csrf()` only checked form-style requests, so an empty or JSON POST passed it; SameSite=Lax covered other sites but not other subdomains such as test.yoy.fyi.
+- The page CSP gains `connect-src 'self'` so the script can reach those endpoints.

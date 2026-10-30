@@ -4,10 +4,9 @@
 // user (ADR-0005) gets their own personal service and nothing else.
 import type { SQL } from "bun";
 import { type Context, Hono } from "hono";
-import { csrf } from "hono/csrf";
 import { type AdminConfig, LoginForm, adminSignedIn } from "./admin/auth";
 import { Layout } from "./admin/layout";
-import { isUuid } from "./http";
+import { isUuid, sameOrigin } from "./http";
 import type { Caller } from "./keys";
 import { type RateLimit, createRateLimiter, rateLimitKey } from "./ratelimit";
 import { currentUser } from "./users";
@@ -408,7 +407,7 @@ export function oauthRoutes(deps: Deps) {
     return who ? consentPage(c, pending!, who) : loginPage(c, pending!.id);
   });
 
-  app.post("/oauth/authorize", csrf({ origin: publicOrigin }), async (c) => {
+  app.post("/oauth/authorize", sameOrigin(publicOrigin), async (c) => {
     const who = await approver(c);
     if (!who) return c.text("Sign in first", 401);
     const form = await c.req.parseBody({ all: true });

@@ -4,7 +4,6 @@ import type { SQL } from "bun";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { getCookie, setCookie } from "hono/cookie";
-import { csrf } from "hono/csrf";
 import { raw } from "hono/html";
 import type { Child } from "hono/jsx";
 import { type AdminConfig, startGoogle } from "./admin/auth";
@@ -12,7 +11,7 @@ import { BarChart, Ranking } from "./admin/charts";
 import { Errors, when } from "./admin/layout";
 import { linkBody, previewFrom } from "./admin/links";
 import { timeseries, breakdown } from "./analytics";
-import { isUuid } from "./http";
+import { isUuid, sameOrigin } from "./http";
 import { type Scope, issueKey } from "./keys";
 import { type LinkRow, createLink, toLink, updateLink } from "./links";
 import { conversionTotals } from "./conversions";
@@ -21,6 +20,7 @@ import { type QrError, type QrStyle, qrOptions, qrPng, qrSvg } from "./qr";
 import { createRateLimiter } from "./ratelimit";
 import type { UnsafeUrls } from "./safe-browsing";
 import { checkTarget } from "./target-policy";
+import { agentRoutes } from "./webmcp";
 import { clientLabel } from "./oauth";
 import { issueConnectToken } from "./telegram";
 import { LANGS, type Lang } from "./blog";
@@ -113,6 +113,7 @@ function Page({
           Object.entries(alternates).map(([l, href]) => <link rel="alternate" hreflang={l} href={href} />)}
         {jsonLd && <script type="application/ld+json">{raw(JSON.stringify(jsonLd).replace(/</g, "\\u003c"))}</script>}
         <script src="/static/copy.js" defer></script>
+        {user && <script src="/static/webmcp.js" defer></script>}
       </head>
       <body data-copied={T.home.copied} data-copy-failed={T.home.copyFailed}>
         <header>
@@ -248,10 +249,10 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   });
 
   // Form posts must come from our own origin.
-  app.use("/links/*", csrf({ origin: publicOrigin }));
-  app.use("/links", csrf({ origin: publicOrigin }));
-  app.use("/account/*", csrf({ origin: publicOrigin }));
-  app.use("/logout", csrf({ origin: publicOrigin }));
+  app.use("/links/*", sameOrigin(publicOrigin));
+  app.use("/links", sameOrigin(publicOrigin));
+  app.use("/account/*", sameOrigin(publicOrigin));
+  app.use("/logout", sameOrigin(publicOrigin));
 
   // Pages need a session; form posts without one get 401 instead of a redirect.
   const signedIn = async (c: Context<Env>, next: () => Promise<void>) => {
@@ -263,6 +264,9 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
   app.use("/links", signedIn);
   app.use("/links/*", signedIn);
   app.use("/account/*", signedIn);
+
+  // WebMCP endpoints for the browser's agent (/static/webmcp.js); see webmcp.tsx.
+  app.route("/", agentRoutes({ sql, publicOrigin, now, resolveHost, unsafeUrls, limitCreate }));
 
   const ownLink = async (u: User, id: string) =>
     isUuid(id) ? ((await sql`select * from links where id = ${id} and service_id = ${u.serviceId}`)[0] as LinkRow | undefined) : undefined;
