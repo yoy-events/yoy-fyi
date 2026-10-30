@@ -16,6 +16,8 @@ describe("checkTarget", () => {
     };
     expect(await check("http://93.184.215.14/", noDns)).toBeNull();
     expect(await check("http://[2606:2800:21f:cb07:6820:80da:af6b:8b2c]/", noDns)).toBeNull();
+    // Next to the Teredo prefix 2001::/32 but outside it.
+    expect(await check("http://[2001:4860:4860::8888]/", noDns)).toBeNull();
   });
 
   test.each(["javascript:alert(1)", "data:text/html,hi", "ftp://example.com/", "mailto:a@b.c", "not a url"])(
@@ -58,6 +60,8 @@ describe("checkTarget", () => {
     "http://[fd00::1]/",
     "http://[fe80::1]/",
     "http://[::ffff:127.0.0.1]/",
+    "http://[2002:7f00:1::1]/", // 6to4 around 127.0.0.1
+    "http://[2001:0:a00:1::1]/", // Teredo
     "http://localhost:3000/",
     "http://api.localhost/",
     "http://db.internal/",
