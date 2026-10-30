@@ -75,7 +75,6 @@ export function conversionRoutes({ sql, now }: { sql: SQL; now: () => Date }) {
     const value = (body.value as number | undefined) ?? null;
     const currency = body.currency ? String(body.currency).toUpperCase() : null;
     const externalId = (body.external_id as string | undefined) ?? null;
-    const same = (r: Row) => r.event === body.event && r.click_id === body.click_id && (r.value === null ? null : Number(r.value)) === value && r.currency === currency;
 
     const [row] = await sql`
       insert into conversions (id, service_id, link_id, click_id, event, value, currency, external_id, occurred_at)
@@ -85,8 +84,12 @@ export function conversionRoutes({ sql, now }: { sql: SQL; now: () => Date }) {
     if (row) return c.json(toConversion(row as Row), 201);
 
     // The same external_id again: a retry of the same event is fine, a different one is a mistake.
-    const [existing] = await sql`select * from conversions where service_id = ${serviceId} and external_id = ${externalId}`;
-    if (!same(existing as Row)) {
+    // Postgres compares the value, so a retry of 19.999 matches the 20.00 that numeric(14,2) kept.
+    const [existing] = await sql`
+      select *, (event = ${body.event as string} and click_id = ${body.click_id as string}
+                 and value is not distinct from ${value}::numeric(14, 2) and currency is not distinct from ${currency}) as same
+      from conversions where service_id = ${serviceId} and external_id = ${externalId}`;
+    if (!existing.same) {
       return apiError(c, 409, "conversion_conflict", "This external_id was already used for a different conversion.");
     }
     return c.json(toConversion(existing as Row), 200);

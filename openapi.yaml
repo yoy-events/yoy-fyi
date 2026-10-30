@@ -805,7 +805,7 @@ components:
           type: string
           pattern: '^[a-z0-9][a-z0-9_.:-]{0,63}$'
           examples: [signup, purchase]
-        value: { type: number, minimum: 0, maximum: 1000000000, description: Requires `currency`. }
+        value: { type: number, minimum: 0, maximum: 1000000000, description: Requires `currency`. Kept to two decimal places. }
         currency: { type: string, pattern: '^[A-Za-z]{3}$', description: ISO 4217, stored upper-case. Requires `value`. }
         external_id: { type: string, minLength: 1, maxLength: 128 }
         occurred_at:
