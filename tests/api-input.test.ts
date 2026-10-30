@@ -92,6 +92,7 @@ describe("POST /v1/links", () => {
     ["tags as a string", { target_url: "https://example.com/", tags: "a" }],
     ["an unknown field", { target_url: "https://example.com/", owner: "me" }],
     ["expires_at that is not a date", { target_url: "https://example.com/", expires_at: "tomorrow" }],
+    ["expires_at on a day the month does not have", { target_url: "https://example.com/", expires_at: "2099-02-30T00:00:00Z" }],
   ])("invalid: %s returns 422 validation_failed", async (_, body) => {
     const res = await send("POST", "/v1/links", body);
     expect(res.status).toBe(422);

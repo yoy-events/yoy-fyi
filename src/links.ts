@@ -385,9 +385,6 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createL
     // `q` matches code, title or target as plain text; LIKE wildcards in it are escaped.
     const search = (q.q ?? "").trim();
     const pattern = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
-    // Passed as instants: Postgres refuses some dates that Date.parse rolls over, such as February 30.
-    const createdAfter = q.created_after ? new Date(q.created_after) : null;
-    const createdBefore = q.created_before ? new Date(q.created_before) : null;
 
     const rows: LinkRow[] = await sql`
       select * from links
@@ -398,8 +395,8 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createL
         and (${q.ext_service ?? null}::text is null or ext_service = ${q.ext_service ?? null})
         and (${q.ext_entity_type ?? null}::text is null or ext_entity_type = ${q.ext_entity_type ?? null})
         and (${q.ext_entity_id ?? null}::text is null or ext_entity_id = ${q.ext_entity_id ?? null})
-        and (${createdAfter}::timestamptz is null or created_at >= ${createdAfter}::timestamptz)
-        and (${createdBefore}::timestamptz is null or created_at < ${createdBefore}::timestamptz)
+        and (${q.created_after ?? null}::timestamptz is null or created_at >= ${q.created_after ?? null}::timestamptz)
+        and (${q.created_before ?? null}::timestamptz is null or created_at < ${q.created_before ?? null}::timestamptz)
         and (${cursor ?? null}::uuid is null or id < ${cursor ?? null}::uuid)
         and case ${status}
           when 'disabled' then disabled_at is not null
