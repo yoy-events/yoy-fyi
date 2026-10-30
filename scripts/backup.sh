@@ -33,12 +33,14 @@ backup_once() {
   name="yoy_fyi-$(date -u +%F).sql.gz"
   tmp="$(mktemp)"
   trap 'rm -f "$tmp"' RETURN
-  pg_dump --no-owner --no-privileges | gzip -9 > "$tmp"
-  gzip -t "$tmp"
+  # Every step returns on failure itself: the loop calls this as `backup_once || log`, and bash
+  # ignores set -e inside a function called that way.
+  pg_dump --no-owner --no-privileges | gzip -9 > "$tmp" || { log "pg_dump failed, not uploading"; return 1; }
+  gzip -t "$tmp" || return 1
   # A dump this small is an empty database or a failed dump, not a backup.
   [ "$(wc -c < "$tmp")" -gt 1024 ] || { log "dump is suspiciously small, not uploading"; return 1; }
-  rclone copyto "$tmp" "remote:${S3_BUCKET}/${name}"
-  rclone delete "remote:${S3_BUCKET}" --min-age "${KEEP_DAYS}d" --include "yoy_fyi-*.sql.gz"
+  rclone copyto "$tmp" "remote:${S3_BUCKET}/${name}" || return 1
+  rclone delete "remote:${S3_BUCKET}" --min-age "${KEEP_DAYS}d" --include "yoy_fyi-*.sql.gz" || return 1
   log "uploaded ${name} ($(wc -c < "$tmp" | tr -d " ") bytes)"
 }
 

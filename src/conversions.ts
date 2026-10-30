@@ -4,9 +4,8 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { type AuthEnv, requireScope } from "./auth";
-import { apiError, isUuid, readJsonObject, validationFailed } from "./http";
+import { apiError, isDateTime, isUuid, readJsonObject, validationFailed } from "./http";
 
-const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 const EVENT = /^[a-z0-9][a-z0-9_.:-]{0,63}$/;
 const FIELDS = new Set(["click_id", "event", "value", "currency", "external_id", "occurred_at"]);
 const DAY = 86_400_000;
@@ -49,7 +48,7 @@ export function validateConversion(body: Record<string, unknown>, now: Date): Re
   const ext = body.external_id;
   if (ext !== undefined && (typeof ext !== "string" || ext.length < 1 || ext.length > 128)) fields.external_id = "1-128 characters";
   const at = body.occurred_at;
-  if (at !== undefined && (typeof at !== "string" || !RFC3339.test(at) || Number.isNaN(Date.parse(at)) || Date.parse(at) > now.getTime() + 60_000)) {
+  if (at !== undefined && (typeof at !== "string" || !isDateTime(at) || Date.parse(at) > now.getTime() + 60_000)) {
     fields.occurred_at = "RFC 3339 date-time, not in the future";
   }
   return fields;
@@ -76,7 +75,6 @@ export function conversionRoutes({ sql, now }: { sql: SQL; now: () => Date }) {
     const value = (body.value as number | undefined) ?? null;
     const currency = body.currency ? String(body.currency).toUpperCase() : null;
     const externalId = (body.external_id as string | undefined) ?? null;
-    const same = (r: Row) => r.event === body.event && r.click_id === body.click_id && (r.value === null ? null : Number(r.value)) === value && r.currency === currency;
 
     const [row] = await sql`
       insert into conversions (id, service_id, link_id, click_id, event, value, currency, external_id, occurred_at)
@@ -86,8 +84,12 @@ export function conversionRoutes({ sql, now }: { sql: SQL; now: () => Date }) {
     if (row) return c.json(toConversion(row as Row), 201);
 
     // The same external_id again: a retry of the same event is fine, a different one is a mistake.
-    const [existing] = await sql`select * from conversions where service_id = ${serviceId} and external_id = ${externalId}`;
-    if (!same(existing as Row)) {
+    // Postgres compares the value, so a retry of 19.999 matches the 20.00 that numeric(14,2) kept.
+    const [existing] = await sql`
+      select *, (event = ${body.event as string} and click_id = ${body.click_id as string}
+                 and value is not distinct from ${value}::numeric(14, 2) and currency is not distinct from ${currency}) as same
+      from conversions where service_id = ${serviceId} and external_id = ${externalId}`;
+    if (!existing.same) {
       return apiError(c, 409, "conversion_conflict", "This external_id was already used for a different conversion.");
     }
     return c.json(toConversion(existing as Row), 200);
@@ -97,7 +99,7 @@ export function conversionRoutes({ sql, now }: { sql: SQL; now: () => Date }) {
     const q = c.req.query();
     const serviceId = c.get("caller").serviceId;
     const valid =
-      RFC3339.test(q.from ?? "") && RFC3339.test(q.to ?? "") && Date.parse(q.from!) < Date.parse(q.to!) && (q.link_id === undefined || isUuid(q.link_id));
+      isDateTime(q.from ?? "") && isDateTime(q.to ?? "") && Date.parse(q.from!) < Date.parse(q.to!) && (q.link_id === undefined || isUuid(q.link_id));
     if (!valid) return apiError(c, 400, "invalid_request", "Invalid or missing query parameter.");
     if (Date.parse(q.to!) - Date.parse(q.from!) > 400 * DAY) return apiError(c, 422, "range_too_large", "The requested range is too large.");
     if (q.link_id) {

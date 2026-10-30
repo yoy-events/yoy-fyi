@@ -65,6 +65,22 @@ describe("POST /v1/conversions", () => {
     expect(await sql`select 1 from conversions`).toHaveLength(1);
   });
 
+  test("a retry of a value with more than two decimals is the same conversion, not a conflict", async () => {
+    // value is stored as numeric(14,2): 19.999 is kept as 20.00, and the retry still sends 19.999.
+    const body = { click_id: clickId, event: "purchase", value: 19.999, currency: "USD", external_id: "o-cents" };
+    const first = await record(body);
+    expect(first.status).toBe(201);
+    const again = await record(body);
+    expect(again.status).toBe(200);
+    expect((await again.json()).id).toBe((await first.json()).id);
+  });
+
+  test("the same external_id with a value that differs after rounding is a conflict", async () => {
+    await record({ click_id: clickId, event: "purchase", value: 10.004, currency: "USD", external_id: "o-2" });
+    const res = await record({ click_id: clickId, event: "purchase", value: 10.01, currency: "USD", external_id: "o-2" });
+    expect(res.status).toBe(409);
+  });
+
   test("the same external_id with a different body is a conflict", async () => {
     await record({ click_id: clickId, event: "purchase", value: 10, currency: "USD", external_id: "o-1" });
     const res = await record({ click_id: clickId, event: "purchase", value: 99, currency: "USD", external_id: "o-1" });

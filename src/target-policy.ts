@@ -42,6 +42,8 @@ for (const [net, bits] of [
   ["::", 127], // :: and ::1
   ["::ffff:0:0", 96], // IPv4-mapped: never needed in a public link
   ["64:ff9b::", 96], // NAT64
+  ["2001::", 32], // Teredo: tunnels to an embedded IPv4 address
+  ["2002::", 16], // 6to4: likewise
   ["2001:db8::", 32],
   ["fc00::", 7],
   ["fe80::", 10],

@@ -623,6 +623,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/Delivery' }
                   next_cursor: { $ref: '#/components/schemas/NextCursor' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -805,7 +806,7 @@ components:
           type: string
           pattern: '^[a-z0-9][a-z0-9_.:-]{0,63}$'
           examples: [signup, purchase]
-        value: { type: number, minimum: 0, maximum: 1000000000, description: Requires `currency`. }
+        value: { type: number, minimum: 0, maximum: 1000000000, description: Requires `currency`. Kept to two decimal places. }
         currency: { type: string, pattern: '^[A-Za-z]{3}$', description: ISO 4217, stored upper-case. Requires `value`. }
         external_id: { type: string, minLength: 1, maxLength: 128 }
         occurred_at:
@@ -893,11 +894,11 @@ components:
         Appended to the target on redirect. A parameter already present in the target URL, or in
         the incoming short-link request, is never overwritten.
       properties:
-        utm_source: { type: string, maxLength: 200 }
-        utm_medium: { type: string, maxLength: 200 }
-        utm_campaign: { type: string, maxLength: 200 }
-        utm_term: { type: string, maxLength: 200 }
-        utm_content: { type: string, maxLength: 200 }
+        utm_source: { type: string, minLength: 1, maxLength: 200 }
+        utm_medium: { type: string, minLength: 1, maxLength: 200 }
+        utm_campaign: { type: string, minLength: 1, maxLength: 200 }
+        utm_term: { type: string, minLength: 1, maxLength: 200 }
+        utm_content: { type: string, minLength: 1, maxLength: 200 }
 
     ExternalRef:
       type: object

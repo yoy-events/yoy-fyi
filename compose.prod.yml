@@ -20,7 +20,10 @@ services:
       retries: 20
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        GEOIP_MONTH: ${GEOIP_MONTH:-}
     image: yoy-fyi:${STAGE:?}
     restart: unless-stopped
     env_file:

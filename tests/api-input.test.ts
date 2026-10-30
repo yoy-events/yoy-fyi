@@ -81,6 +81,7 @@ describe("POST /v1/links", () => {
     ["target_url", { target_url: "" }],
     ["code", { target_url: "https://example.com/", code: "" }],
     ["tags", { target_url: "https://example.com/", tags: [""] }],
+    ["utm_defaults value", { target_url: "https://example.com/", utm_defaults: { utm_source: "" } }],
     ["external_ref", { target_url: "https://example.com/", external_ref: { service: "", entity_type: "", entity_id: "" } }],
   ])("empty: an empty %s returns 422", async (_, body) => {
     expect((await send("POST", "/v1/links", body)).status).toBe(422);
@@ -92,6 +93,7 @@ describe("POST /v1/links", () => {
     ["tags as a string", { target_url: "https://example.com/", tags: "a" }],
     ["an unknown field", { target_url: "https://example.com/", owner: "me" }],
     ["expires_at that is not a date", { target_url: "https://example.com/", expires_at: "tomorrow" }],
+    ["expires_at on a day the month does not have", { target_url: "https://example.com/", expires_at: "2099-02-30T00:00:00Z" }],
   ])("invalid: %s returns 422 validation_failed", async (_, body) => {
     const res = await send("POST", "/v1/links", body);
     expect(res.status).toBe(422);

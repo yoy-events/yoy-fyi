@@ -59,7 +59,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build and start the stack
-        run: docker compose -p "$PROJECT" -f compose.prod.yml --env-file "deploy/$STAGE.env" up -d --build --wait --wait-timeout 180
+        # GEOIP_MONTH makes the first build of a month fetch that month's DB-IP database (see Dockerfile).
+        run: GEOIP_MONTH="$(date -u +%Y-%m)" docker compose -p "$PROJECT" -f compose.prod.yml --env-file "deploy/$STAGE.env" up -d --build --wait --wait-timeout 180
       - name: Smoke through the public URL
         run: |
           for _ in $(seq 1 30); do
