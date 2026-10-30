@@ -351,6 +351,8 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createL
     const limit = limitCreate(caller.serviceId);
     c.header("RateLimit-Limit", String(limitCreate.burst));
     c.header("RateLimit-Remaining", String(limit.remaining));
+    // Seconds until the bucket is full again, rounded up from the whole tokens left.
+    c.header("RateLimit-Reset", String(Math.ceil(((limitCreate.burst - limit.remaining) * 60) / createLimit.perMinute)));
     if (!limit.ok) {
       c.header("Retry-After", String(limit.retryAfterSeconds));
       return apiError(c, 429, "rate_limited", "Too many link creates for this service.");
