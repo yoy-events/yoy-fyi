@@ -42,4 +42,13 @@ describe("qrSvg", () => {
     expect(svg).toContain(">Scan &lt;me&gt; &amp; go</text>");
     expect(svg.match(/<svg/g)).toHaveLength(1);
   });
+
+  // XML forbids these characters even escaped, so one in the caption (?caption=%01) broke the image.
+  test("control characters in a caption are dropped, so the SVG stays valid XML", async () => {
+    const caption = (q({ caption: "Scan\u0001 me\u001f\uffff" }) as { caption: string }).caption;
+    const svg = await qrSvg("https://yoy.fyi/abc", { fg: "#000000", bg: "#ffffff", caption });
+    expect(svg).toContain(">Scan me</text>");
+    for (const ch of ["\u0001", "\u001f", "\uffff"]) expect(svg).not.toContain(ch);
+    expect(q({ caption: "\u0001" })).toMatchObject({ caption: null });
+  });
 });

@@ -6,6 +6,9 @@ export type QrStyle = { fg: string; bg: string; caption: string | null };
 
 const HEX = /^#[0-9a-f]{6}$/;
 const MAX_CAPTION = 40;
+// Characters XML does not allow at all, even escaped; the caption drops them.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
+const NOT_XML = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g;
 
 // WCAG relative luminance.
 const luminance = (hex: string) => {
@@ -24,7 +27,7 @@ export type QrError = "fg" | "bg" | "contrast" | "caption";
 export function qrOptions(query: URLSearchParams): QrStyle | { error: QrError } {
   const fg = (query.get("fg") || "#000000").toLowerCase();
   const bg = (query.get("bg") || "#ffffff").toLowerCase();
-  const caption = (query.get("caption") ?? "").trim() || null;
+  const caption = (query.get("caption") ?? "").replace(NOT_XML, "").trim() || null;
   if (!HEX.test(fg)) return { error: "fg" };
   if (!HEX.test(bg)) return { error: "bg" };
   if (luminance(fg) >= luminance(bg) || (luminance(bg) + 0.05) / (luminance(fg) + 0.05) < 3) {
