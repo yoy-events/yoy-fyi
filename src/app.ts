@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { type AdminConfig, adminRoutes } from "./admin";
 import { analyticsRoutes } from "./analytics";
+import { conversionRoutes } from "./conversions";
 import { type Post, blogRoutes, loadPosts } from "./blog";
 import { requireKey } from "./auth";
 import { type Click, describeUserAgent, insertClick, queryFields, refererHost } from "./click";
@@ -169,6 +170,7 @@ export function createApp({
   v1.use(requireKey(sql));
   v1.route("/", keyRoutes(sql));
   v1.route("/", analyticsRoutes(sql));
+  v1.route("/", conversionRoutes({ sql, now }));
   v1.route("/", webhookRoutes({ sql, publicOrigin, webhookKey, resolveHost }));
   v1.route("/", linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createLimit }));
   app.route("/v1", v1);

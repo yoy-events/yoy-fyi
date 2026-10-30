@@ -23,7 +23,7 @@ export function testDb(): Promise<SQL> {
 }
 
 export async function reset(sql: SQL): Promise<void> {
-  await sql`truncate clicks, links, api_keys, services, daily_salts, link_stats_hourly, link_stats_daily, link_dims_daily, webhook_deliveries, webhooks, admin_login_tokens, oauth_grants, oauth_codes, oauth_pending, oauth_clients, telegram_connect_tokens, bio_pages, mcp_calls, page_views, users`;
+  await sql`truncate clicks, links, api_keys, services, daily_salts, link_stats_hourly, link_stats_daily, link_dims_daily, webhook_deliveries, webhooks, admin_login_tokens, oauth_grants, oauth_codes, oauth_pending, oauth_clients, telegram_connect_tokens, bio_pages, mcp_calls, page_views, conversions, users`;
   await sql`update outbox_cursor set last_click_id = '00000000-0000-0000-0000-000000000000', last_clicked_at = '2000-01-01Z'`;
 }
 
@@ -51,6 +51,7 @@ export async function createLink(sql: SQL, serviceId: string, link: LinkInput): 
 }
 
 type ClickInput = {
+  id?: string;
   link_id: string;
   service_id: string;
   clicked_at: string;

@@ -14,6 +14,7 @@ import { timeseries, breakdown } from "./analytics";
 import { isUuid } from "./http";
 import { type Scope, issueKey } from "./keys";
 import { type LinkRow, createLink, toLink, updateLink } from "./links";
+import { conversionTotals } from "./conversions";
 import { parseCsv, toCsv } from "./csv";
 import { type QrError, type QrStyle, qrOptions, qrPng, qrSvg } from "./qr";
 import { createRateLimiter } from "./ratelimit";
@@ -30,7 +31,7 @@ import { type User, clearUserSession, currentUser } from "./users";
 const DAY = 86_400_000;
 const MAX_KEYS = 10;
 // What a person may grant their own keys. Keys are managed here, never through keys:manage.
-const USER_SCOPES = ["links:read", "links:write", "analytics:read", "webhooks:manage"] as const satisfies readonly Scope[];
+const USER_SCOPES = ["links:read", "links:write", "analytics:read", "webhooks:manage", "conversions:write"] as const satisfies readonly Scope[];
 // Messages for a createLink / updateLink error, in the page's language.
 function errorList(T: Msg, r: { code: string; message: string; details?: Record<string, unknown> }): string[] {
   const fields = (r.details?.fields ?? {}) as Record<string, string>;
@@ -702,6 +703,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
     const dayEnd = Math.floor(now().getTime() / DAY) * DAY + DAY;
     const scope = { serviceId: u.serviceId, linkId: link.id, tag: null, from: new Date(dayEnd - 30 * DAY), to: new Date(dayEnd), bots: "exclude" as const };
     const daily = await timeseries(sql, scope, "day");
+    const conversions = await conversionTotals(sql, u.serviceId, new Date(dayEnd - 30 * DAY), new Date(dayEnd), link.id);
     const [referrers, channels, countries, devices] = await Promise.all(
       (["referer_host", "utm_source", "country", "device"] as const).map((d) => breakdown(sql, scope, d, 5)),
     );
@@ -779,6 +781,19 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
         <p class="meta">
           <a href={`/links/${link.id}/clicks.csv`}>{T.link.downloadClicks}</a>
         </p>
+        <h2>{T.link.conversions}</h2>
+        {conversions.length === 0 ? (
+          <p class="meta">{T.link.conversionsHint}</p>
+        ) : (
+          <ul class="list">
+            {conversions.map((e) => (
+              <li>
+                <strong>{e.event}</strong>
+                <span class="meta">{T.link.conversionValue(e.count, e.values.map((v) => `${v.total} ${v.currency}`).join(", "))}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <div class="rankings">
           <Ranking title={T.link.referrers} items={referrers!.items} total={referrers!.total_clicks} />
           <Ranking title={T.link.channelsRanking} items={channels!.items} total={channels!.total_clicks} />
@@ -937,7 +952,7 @@ export function webRoutes({ sql, publicOrigin, admin, now, resolveHost, unsafeUr
             <legend>{T.keys.permissions}</legend>
             {USER_SCOPES.map((s) => (
               <label class="check">
-                <input type="checkbox" name="scope" value={s} checked={s !== "webhooks:manage"} /> {T.scopes[s]}
+                <input type="checkbox" name="scope" value={s} checked={s !== "webhooks:manage" && s !== "conversions:write"} /> {T.scopes[s]}
               </label>
             ))}
           </fieldset>

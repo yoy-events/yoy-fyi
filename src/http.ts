@@ -12,6 +12,7 @@ export type ErrorCode =
   | "target_rejected"
   | "code_reserved"
   | "idempotency_key_reused"
+  | "conversion_conflict"
   | "range_too_large"
   | "scope_not_allowed"
   | "rate_limited"

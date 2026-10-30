@@ -91,7 +91,7 @@ const INSTRUCTIONS = [
   "Never invent a short URL: call create_link (or create_links for several) and give the user the short_url it returns.",
   "To show a QR code, call get_qr with the link id; it returns the image. Printable PNG and SVG with a caption are also on the link's page at yoy.fyi.",
   "Find links with list_links (q searches code, title and target; tag filters). Change them with update_link, take them down with disable_link.",
-  "For stats use get_click_timeseries and get_click_breakdown (by referer_host, utm_source, country, device and more).",
+  "For stats use get_click_timeseries and get_click_breakdown (by referer_host, utm_source, country, device and more), and get_conversions for sign-ups and purchases the service reported.",
   "For channel tracking, share the short link with ?utm_source=telegram&utm_medium=social (or instagram, facebook, email); the redirect passes these on and records them.",
   "get_bio and update_bio manage the user's link-in-bio page at yoy.fyi/@handle.",
   "Reply in the user's language. Errors start with a code such as validation_failed or target_rejected; explain them plainly.",
@@ -266,6 +266,22 @@ const TOOLS: Tool[] = [
       }
       return api("GET", "/analytics/timeseries", { query: pick(args, ["from", "to", "interval", "link_id", "tag", "bots"]) });
     },
+  },
+  {
+    name: "get_conversions",
+    scope: "analytics:read",
+    title: "Get conversions",
+    description:
+      "Returns how many conversions (sign-ups, purchases and other events that the service reported for clicks on its links) happened in a time range, per event, with the total value per currency. Optionally for one link.",
+    annotations: READ,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["from", "to"],
+      properties: { from: RANGE.from, to: RANGE.to, link_id: RANGE.link_id },
+    },
+    outputSchema: { type: "object", required: ["events"], properties: { events: { type: "array" } } },
+    run: (args, api) => api("GET", "/analytics/conversions", { query: pick(args, ["from", "to", "link_id"]) }),
   },
   {
     name: "get_click_breakdown",

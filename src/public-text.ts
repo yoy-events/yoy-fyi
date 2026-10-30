@@ -39,7 +39,7 @@ export type PublicText = {
   };
 };
 
-const TOOL_NAMES = ["create_link", "create_links", "list_links", "get_link", "update_link", "disable_link", "get_qr", "get_click_timeseries", "get_click_breakdown", "get_bio, update_bio", "whoami"];
+const TOOL_NAMES = ["create_link", "create_links", "list_links", "get_link", "update_link", "disable_link", "get_qr", "get_click_timeseries", "get_click_breakdown", "get_conversions", "get_bio, update_bio", "whoami"];
 const tools = (texts: string[]): [string, string][] => TOOL_NAMES.map((n, i) => [n, texts[i]!]);
 
 export const PUBLIC_TEXT: Record<Lang, PublicText> = {
@@ -110,6 +110,7 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
         "повертає QR-код картинкою",
         "кліки за годинами чи днями",
         "кліки за джерелом, UTM, країною, пристроєм",
+        "реєстрації й оплати, які сервіс передав для посилань",
         "сторінка link-in-bio yoy.fyi/@назва",
         "до якого акаунта підключено",
       ]),
@@ -185,6 +186,7 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
         "returns the QR code as an image",
         "clicks by hour or day",
         "clicks by source, UTM, country, device",
+        "sign-ups and purchases the service reported for the links",
         "the link-in-bio page yoy.fyi/@name",
         "which account is connected",
       ]),
@@ -260,6 +262,7 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
         "devuelve el código QR como imagen",
         "clics por hora o por día",
         "clics por origen, UTM, país, dispositivo",
+        "registros y compras que el servicio informó para los enlaces",
         "la página link-in-bio yoy.fyi/@nombre",
         "qué cuenta está conectada",
       ]),
@@ -335,6 +338,7 @@ export const PUBLIC_TEXT: Record<Lang, PublicText> = {
         "renvoie le code QR en image",
         "clics par heure ou par jour",
         "clics par source, UTM, pays, appareil",
+        "inscriptions et achats signalés par le service pour les liens",
         "la page link-in-bio yoy.fyi/@nom",
         "quel compte est connecté",
       ]),

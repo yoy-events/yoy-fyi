@@ -4,7 +4,7 @@ import type { Lang } from "./blog";
 
 type M = {
   nav: { keys: string; apps: string; bio: string; signOut: string; blog: string; privacy: string; terms: string; language: string };
-  scopes: Record<"links:read" | "links:write" | "analytics:read" | "webhooks:manage", string>;
+  scopes: Record<"links:read" | "links:write" | "analytics:read" | "webhooks:manage" | "conversions:write", string>;
   status: Record<string, string>;
   fields: Record<string, string>;
   unknownField: (k: string) => string;
@@ -76,6 +76,9 @@ type M = {
     captionPlaceholder: string;
     apply: string;
     clicks30: (n: number) => string;
+    conversions: string;
+    conversionsHint: string;
+    conversionValue: (count: number, values: string) => string;
     visitors: (n: number) => string;
     downloadClicks: string;
     referrers: string;
@@ -135,6 +138,7 @@ export const MESSAGES: Record<Lang, M> = {
       "links:write": "Створювати, змінювати й вимикати посилання",
       "analytics:read": "Читати статистику кліків",
       "webhooks:manage": "Керувати вебхуками кліків",
+      "conversions:write": "Передавати конверсії (реєстрації, оплати)",
     },
     status: { active: "активне", expired: "закінчилось", disabled: "вимкнене" },
     fields: {
@@ -236,6 +240,9 @@ export const MESSAGES: Record<Lang, M> = {
       captionPlaceholder: "Скануй мене",
       apply: "Застосувати",
       clicks30: (n) => `Кліків за 30 днів: ${n}`,
+      conversions: "Конверсії за 30 днів",
+      conversionsHint: "Передавайте їх з API (POST /v1/conversions): посилання має бути з pass_click_id, а ключ з дозволом conversions:write.",
+      conversionValue: (count, values) => `${count}${values ? ` · ${values}` : ""}`,
       visitors: (n) => `(відвідувачів щонайбільше ${n})`,
       downloadClicks: "Завантажити кліки в CSV",
       referrers: "Джерела",
@@ -335,6 +342,7 @@ export const MESSAGES: Record<Lang, M> = {
       "links:write": "Create, change and disable links",
       "analytics:read": "Read click stats",
       "webhooks:manage": "Manage click webhooks",
+      "conversions:write": "Report conversions (sign-ups, purchases)",
     },
     status: { active: "active", expired: "expired", disabled: "disabled" },
     fields: {
@@ -436,6 +444,9 @@ export const MESSAGES: Record<Lang, M> = {
       captionPlaceholder: "Scan me",
       apply: "Apply",
       clicks30: (n) => `${n} clicks in 30 days`,
+      conversions: "Conversions in 30 days",
+      conversionsHint: "Report them through the API (POST /v1/conversions): the link needs pass_click_id and the key the conversions:write permission.",
+      conversionValue: (count, values) => `${count}${values ? ` · ${values}` : ""}`,
       visitors: (n) => `(${n} visitors at most)`,
       downloadClicks: "Download clicks as CSV",
       referrers: "Sources",
@@ -535,6 +546,7 @@ export const MESSAGES: Record<Lang, M> = {
       "links:write": "Crear, cambiar y desactivar enlaces",
       "analytics:read": "Leer estadísticas de clics",
       "webhooks:manage": "Gestionar webhooks de clics",
+      "conversions:write": "Enviar conversiones (registros, compras)",
     },
     status: { active: "activo", expired: "caducado", disabled: "desactivado" },
     fields: {
@@ -636,6 +648,9 @@ export const MESSAGES: Record<Lang, M> = {
       captionPlaceholder: "Escanéame",
       apply: "Aplicar",
       clicks30: (n) => `${n} clics en 30 días`,
+      conversions: "Conversiones en 30 días",
+      conversionsHint: "Envíalas por la API (POST /v1/conversions): el enlace necesita pass_click_id y la clave el permiso conversions:write.",
+      conversionValue: (count, values) => `${count}${values ? ` · ${values}` : ""}`,
       visitors: (n) => `(como mucho ${n} visitantes)`,
       downloadClicks: "Descargar clics en CSV",
       referrers: "Orígenes",
@@ -735,6 +750,7 @@ export const MESSAGES: Record<Lang, M> = {
       "links:write": "Créer, modifier et désactiver des liens",
       "analytics:read": "Lire les statistiques de clics",
       "webhooks:manage": "Gérer les webhooks de clics",
+      "conversions:write": "Envoyer des conversions (inscriptions, achats)",
     },
     status: { active: "actif", expired: "expiré", disabled: "désactivé" },
     fields: {
@@ -836,6 +852,9 @@ export const MESSAGES: Record<Lang, M> = {
       captionPlaceholder: "Scannez-moi",
       apply: "Appliquer",
       clicks30: (n) => `${n} clics en 30 jours`,
+      conversions: "Conversions sur 30 jours",
+      conversionsHint: "Envoyez-les par l'API (POST /v1/conversions) : le lien doit avoir pass_click_id et la clé l'autorisation conversions:write.",
+      conversionValue: (count, values) => `${count}${values ? ` · ${values}` : ""}`,
       visitors: (n) => `(${n} visiteurs au plus)`,
       downloadClicks: "Télécharger les clics en CSV",
       referrers: "Sources",

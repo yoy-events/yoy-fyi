@@ -255,3 +255,29 @@ describe("styled QR downloads", () => {
     expect(html).not.toContain(`/links/${id}/qr.png?fg=%23112233`);
   });
 });
+
+describe("conversions on the link page", () => {
+  test("with none, it explains how to report them; with some, it lists events with value per currency", async () => {
+    expect(await (await get(`/links/${id}`)).text()).toContain("POST /v1/conversions");
+    const [row] = await sql`select service_id from links where id = ${id}`;
+    const clickId = Bun.randomUUIDv7();
+    await sql`select create_click_partition(now())`;
+    await sql`insert into clicks (id, link_id, service_id, clicked_at, is_bot) values (${clickId}, ${id}, ${row.service_id}, now() - interval '1 hour', false)`;
+    for (const [event, value, currency] of [["signup", null, null], ["purchase", 100, "UAH"], ["purchase", 20.5, "UAH"]] as const) {
+      await sql`insert into conversions (id, service_id, link_id, click_id, event, value, currency, occurred_at)
+                values (${Bun.randomUUIDv7()}, ${row.service_id}, ${id}, ${clickId}, ${event}, ${value}, ${currency}, ${now})`;
+    }
+    const html = await (await get(`/links/${id}`)).text();
+    expect(html).toContain("<strong>purchase</strong>");
+    expect(html).toContain("2 · 120.5 UAH");
+    expect(html).toContain("<strong>signup</strong>");
+    expect(html).not.toContain("POST /v1/conversions");
+  });
+
+  test("a key made on the keys page can be given conversions:write", async () => {
+    const body = new URLSearchParams([["name", "shop"], ["scope", "conversions:write"], ["scope", "analytics:read"]]);
+    const res = await app.request(`${ORIGIN}/account/keys`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN, cookie }, body: body.toString() });
+    expect(res.status).toBe(201);
+    expect(await sql`select scopes from api_keys where name = 'shop'`).toEqual([{ scopes: ["conversions:write", "analytics:read"] }]);
+  });
+});
