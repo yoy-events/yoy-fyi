@@ -83,7 +83,18 @@ const LINK_FIELDS = {
 };
 
 const pick = (args: Json, keys: string[]) => Object.fromEntries(keys.filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
-const id = (args: Json) => (typeof args.id === "string" && args.id ? encodeURIComponent(args.id) : null);
+// "." and ".." survive encoding and would be resolved away by the URL, reaching another /v1 route.
+const id = (args: Json) =>
+  typeof args.id === "string" && args.id && args.id !== "." && args.id !== ".." ? encodeURIComponent(args.id) : null;
+
+const headerValue = (v: string) => {
+  try {
+    new Headers({ v });
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 // Sent in initialize: how the model should use these tools.
 const INSTRUCTIONS = [
@@ -207,6 +218,11 @@ const TOOLS: Tool[] = [
     outputSchema: LINK,
     run: (args, api) => {
       const { idempotency_key, ...body } = args;
+      // A non-string used to be dropped, so a retry made a second link; a line break or a
+      // character outside Latin-1 can't be sent as a header at all.
+      if (idempotency_key !== undefined && (typeof idempotency_key !== "string" || !headerValue(idempotency_key))) {
+        return Promise.resolve(toolError("validation_failed: idempotency_key must be a string without line breaks or characters outside Latin-1."));
+      }
       const headers: Record<string, string> = typeof idempotency_key === "string" ? { "idempotency-key": idempotency_key } : {};
       return api("POST", "/links", { body, headers });
     },
@@ -455,7 +471,8 @@ export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120
         },
         { createdVia: "mcp", caller },
       );
-      const json = (await res.json()) as Json;
+      // A /v1 route that throws answers with plain text; that still becomes a tool error.
+      const json = (await res.json().catch(() => ({}))) as Json;
       if (!res.ok) {
         const e = (json.error ?? {}) as { code?: string; message?: string; details?: unknown };
         const details = e.details ? ` ${JSON.stringify(e.details)}` : "";

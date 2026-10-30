@@ -1,7 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
+import { Hono } from "hono";
 import { type AppDeps, createApp } from "../src/app";
 import { issueKey } from "../src/keys";
+import { mcpRoutes } from "../src/mcp";
 import { reset, testDb } from "./helpers";
 
 let sql: SQL;
@@ -192,6 +194,27 @@ describe("tools", () => {
     expect(r.content[0]!.text).toContain(code);
   });
 
+  test("create_link takes only a string idempotency_key that can travel as a header", async () => {
+    // A number used to be dropped silently, so a retry made a second link.
+    for (const key of [42, "ключ-1", "a\nb"]) {
+      const r = await call("create_link", { target_url: "https://example.com/i", idempotency_key: key });
+      expect(r.isError).toBe(true);
+      expect(r.content[0]!.text).toStartWith("validation_failed: idempotency_key");
+    }
+    expect((await sql`select count(*)::int as n from links`)[0].n).toBe(0);
+    expect((await call("create_link", { target_url: "https://example.com/i", idempotency_key: "café-1" })).isError).toBeFalsy();
+    const empty = await call("create_link", { target_url: "https://example.com/i", idempotency_key: "" });
+    expect(empty.content[0]!.text).toContain("Idempotency-Key must be 1-255 characters");
+  });
+
+  test.each([["get_link"], ["update_link"], ["disable_link"], ["get_qr"]])("%s with a dot-segment id is a tool error, not a call to another route", async (tool) => {
+    for (const id of [".", ".."]) {
+      const r = await call(tool, { id });
+      expect(r.isError).toBe(true);
+      expect(r.content[0]!.text).toStartWith("validation_failed");
+    }
+  });
+
   test("a key without the scope gets a tool error naming it", async () => {
     const r = await call("create_link", { target_url: "https://example.com/" }, readOnly);
     expect(r.isError).toBe(true);
@@ -250,5 +273,31 @@ describe("created_via", () => {
       body: JSON.stringify({ target_url: "https://example.com/" }),
     });
     expect((await res.json()).created_via).toBe("api");
+  });
+});
+
+describe("a /v1 failure", () => {
+  // A route that throws answers with Hono's plain-text 500, not JSON.
+  const failing = (body: string, status: number) => {
+    const handler = mcpRoutes({ sql, publicOrigin: "https://yoy.fyi", now: () => new Date(), v1: { request: () => new Response(body, { status }) } });
+    return new Hono().post("/mcp", handler) as unknown as typeof app;
+  };
+  const listLinks = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_links", arguments: {} } };
+
+  test.each([
+    ["a plain-text 500", "Internal Server Error", 500],
+    ["an empty 502", "", 502],
+  ])("with %s is a tool error, not a broken response", async (_, body, status) => {
+    const res = await post(listLinks, { target: failing(body, status) });
+    expect(res.status).toBe(200);
+    const { result } = (await res.json()) as { result: Loose };
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(`internal: HTTP ${status}`);
+  });
+
+  test("with a JSON error keeps its code and message", async () => {
+    const json = JSON.stringify({ error: { code: "not_found", message: "Link not found." } });
+    const res = await post(listLinks, { target: failing(json, 404) });
+    expect(((await res.json()) as { result: Loose }).result.content[0].text).toBe("not_found: Link not found.");
   });
 });
