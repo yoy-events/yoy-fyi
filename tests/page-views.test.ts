@@ -79,7 +79,7 @@ describe("counting", () => {
   test("a redirect is not counted, so /blog then /blog/uk is one view", async () => {
     expect((await visit("/blog", { "user-agent": CHROME })).status).toBe(302);
     await visit("/blog/uk", { "user-agent": CHROME });
-    expect((await views()).map((v) => v.path)).toEqual(["/blog/uk"]);
+    expect((await views()).map((v: { path: string }) => v.path)).toEqual(["/blog/uk"]);
   });
 
   test("POSTs are not counted", async () => {
