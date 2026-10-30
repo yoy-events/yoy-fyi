@@ -2,7 +2,8 @@ import { SQL } from "bun";
 import { migrate } from "../src/migrate";
 
 const adminUrl = process.env.TEST_ADMIN_DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:55433/postgres";
-const dbName = "yoy_fyi_test";
+// TEST_DB_NAME lets several checkouts run the suite at once against one Postgres.
+const dbName = process.env.TEST_DB_NAME ?? "yoy_fyi_test";
 
 let ready: Promise<SQL> | undefined;
 
