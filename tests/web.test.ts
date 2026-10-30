@@ -1,37 +1,14 @@
 // The personal home page and account pages (ADR-0004): valid, invalid and empty input.
 import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
-import { type AppDeps, createApp } from "../src/app";
-import { reset, testAdmin, testDb } from "./helpers";
-
-const ORIGIN = "https://yoy.fyi";
-const CLIENT_ID = "123-test.apps.googleusercontent.com";
+import { reset, testDb } from "./helpers";
+import { ORIGIN, webApp } from "./web-helpers";
 
 let sql: SQL;
 let now: Date;
-let mail: ReturnType<typeof testAdmin>;
-let app: ReturnType<typeof createApp>;
-let claims: Record<string, unknown>;
-
-const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
-
-const build = (deps: Partial<AppDeps> = {}) =>
-  createApp({
-    sql,
-    publicOrigin: ORIGIN,
-    countryOf: () => null,
-    resolveHost: async () => ["93.184.215.14"],
-    now: () => now,
-    admin: {
-      ...mail.admin,
-      google: {
-        clientId: CLIENT_ID,
-        clientSecret: "s",
-        exchange: async () => Response.json({ id_token: `${b64url({ alg: "RS256" })}.${b64url(claims)}.sig` }),
-      },
-    },
-    ...deps,
-  });
+let web: ReturnType<typeof webApp>;
+let mail: typeof web.mail;
+let app: typeof web.app;
 
 beforeAll(async () => {
   sql = await testDb();
@@ -40,45 +17,13 @@ beforeAll(async () => {
 beforeEach(async () => {
   await reset(sql);
   now = new Date("2026-10-24T12:00:00Z");
-  mail = testAdmin();
-  app = build();
+  web = webApp(sql, () => now);
+  ({ mail, app } = web);
 });
 
-const cookies = (res: Response) =>
-  res.headers
-    .getSetCookie()
-    .map((c) => c.split(";")[0]!)
-    .filter((c) => !c.endsWith("="))
-    .join("; ");
-const get = (path: string, cookie = "") => app.request(`${ORIGIN}${path}`, { headers: cookie ? { cookie } : {} });
-const post = (path: string, fields: Record<string, string | string[]>, cookie: string, headers: Record<string, string> = {}) => {
-  const body = new URLSearchParams();
-  for (const [k, v] of Object.entries(fields)) for (const one of [v].flat()) body.append(k, one);
-  return app.request(`${ORIGIN}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN, cookie, ...headers },
-    body: body.toString(),
-  });
-};
-
-// Signs in through the real Google flow (with a fake token endpoint) and returns the session cookie.
-async function signIn(sub = "google-1", email = "ann@example.com", extra: Record<string, unknown> = {}) {
-  const start = await get("/login/google");
-  const to = new URL(start.headers.get("location")!);
-  claims = {
-    iss: "https://accounts.google.com",
-    aud: CLIENT_ID,
-    sub,
-    email,
-    email_verified: true,
-    name: "Ann",
-    nonce: to.searchParams.get("nonce"),
-    exp: now.getTime() / 1000 + 3600,
-    ...extra,
-  };
-  const res = await get(`/admin/login/google/callback?code=c&state=${to.searchParams.get("state")}`, cookies(start));
-  return { res, cookie: cookies(res) };
-}
+const get = (path: string, cookie = "") => web.get(path, cookie);
+const post = (path: string, fields: Record<string, string | string[]>, cookie: string, origin = ORIGIN) => web.post(path, fields, cookie, origin);
+const signIn = (sub?: string, email?: string, extra?: Record<string, unknown>) => web.signIn(sub, email, extra);
 
 async function createVia(cookie: string, fields: Record<string, string>) {
   const res = await post("/links", fields, cookie);
@@ -291,7 +236,7 @@ describe("POST /links", () => {
   test("needs a session and our own Origin", async () => {
     const { cookie } = await signIn();
     expect((await post("/links", { target_url: "https://example.com/" }, "")).status).toBe(401);
-    expect((await post("/links", { target_url: "https://example.com/" }, cookie, { origin: "https://evil.example" })).status).toBe(403);
+    expect((await post("/links", { target_url: "https://example.com/" }, cookie, "https://evil.example")).status).toBe(403);
   });
 
   test("allows 20 links an hour per user", async () => {
