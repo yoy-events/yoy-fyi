@@ -227,6 +227,13 @@ describe("POST /oauth/authorize (consent)", () => {
     expect(res.status).toBe(400);
   });
 
+  test("a scope ticked twice is granted once", async () => {
+    const body = await (await exchange(await codeFor(["links:read", "links:read", "analytics:read"]))).json();
+    expect(body.scope).toBe("links:read analytics:read");
+    const [grant] = await sql`select scopes from oauth_grants`;
+    expect(grant.scopes).toEqual(["links:read", "analytics:read"]);
+  });
+
   test("a pending request works once", async () => {
     const pending = await pendingFrom(await get(`/oauth/authorize?${authorizeQuery()}`));
     await form("/oauth/authorize", { pending, decision: "approve", service: serviceId, scope: ["links:read"] });

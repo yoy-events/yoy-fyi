@@ -137,6 +137,13 @@ describe("bio page tools", () => {
     expect((await tool("update_bio", args)).isError).toBe(true);
   });
 
+  test("update_bio stamps the page with the app's clock", async () => {
+    const at = new Date("2026-10-24T12:00:00Z");
+    app = createApp({ sql, publicOrigin: ORIGIN, countryOf: () => null, resolveHost: async () => ["93.184.215.14"], admin: testAdmin().admin, now: () => at });
+    expect((await tool("update_bio", { handle: "ann" })).isError).toBeFalsy();
+    expect((await sql`select updated_at from bio_pages`)[0].updated_at).toEqual(at);
+  });
+
   test("a service without a personal account has no bio page", async () => {
     expect((await tool("get_bio", {}, serviceKey)).isError).toBe(true);
     expect((await tool("update_bio", { handle: "svc" }, serviceKey)).isError).toBe(true);
