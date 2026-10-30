@@ -54,7 +54,7 @@ const LINK = {
     title: { type: ["string", "null"] },
     tags: { type: "array", items: str },
     status: { enum: ["active", "expired", "disabled"] },
-    created_via: { enum: ["api", "admin", "mcp", "web", "telegram"] },
+    created_via: { enum: ["api", "admin", "mcp", "web", "telegram", "webmcp"] },
   },
 };
 const RANGE = {

@@ -57,6 +57,10 @@ claude mcp add --transport http yoy-fyi https://yoy.fyi/mcp --header "Authorizat
 
 In claude.ai or ChatGPT, add a custom connector with the URL `https://yoy.fyi/mcp`. The app sends you to yoy.fyi to sign in with Google. You grant access to your own links and choose the permissions: creating, changing and disabling links starts unticked. Your connections are listed at `/account/apps`, where each can be revoked; the admin sees all of them under **Connected apps** in `/admin` and can grant any service. See [ADR-0003](docs/adr/0003-agent-access.md) and [ADR-0005](docs/adr/0005-user-oauth.md).
 
+### In the browser (WebMCP)
+
+Signed in at yoy.fyi, browsers with WebMCP (experimental in Chrome) see four tools on the page: `create_link`, `list_links`, `get_link` and `disable_link`. A browser's built-in agent can use them with your session, no connector needed. Links made this way are marked `created_via: "webmcp"`.
+
 ## Run it locally
 
 Requires Bun 1.3 and Docker.

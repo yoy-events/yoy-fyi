@@ -66,3 +66,11 @@ export function parseLimit(raw: string | undefined, fallback = 50): number | nul
   const n = Number(raw);
   return Number.isInteger(n) && n >= 1 && n <= 100 ? n : null;
 }
+
+// Every write must come from one of our own pages. Hono's csrf() checks only form-style requests,
+// so a POST with no body or a JSON body would pass it; this checks the Origin of any non-GET.
+export const sameOrigin = (publicOrigin: string) => async (c: Context, next: () => Promise<void>) => {
+  const method = c.req.method;
+  if (method !== "GET" && method !== "HEAD" && c.req.header("origin") !== publicOrigin) return c.text("Forbidden", 403);
+  await next();
+};

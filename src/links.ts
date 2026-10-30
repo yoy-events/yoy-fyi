@@ -47,7 +47,7 @@ export type LinkRow = {
 // The Open Graph preview link-preview bots see instead of the redirect (see app.ts).
 export type Preview = { title: string; description?: string; image?: string };
 
-export type CreatedVia = "api" | "admin" | "mcp" | "web" | "telegram";
+export type CreatedVia = "api" | "admin" | "mcp" | "web" | "telegram" | "webmcp";
 
 export type LinkInput = {
   target_url: string;

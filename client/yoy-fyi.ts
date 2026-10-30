@@ -72,7 +72,7 @@ export type Link = {
   created_at: string;
   updated_at: string;
   disabled_at: string | null;
-  created_via: "api" | "admin" | "mcp" | "web" | "telegram";
+  created_via: "api" | "admin" | "mcp" | "web" | "telegram" | "webmcp";
 };
 
 export type LinkListQuery = {

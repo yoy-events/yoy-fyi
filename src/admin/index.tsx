@@ -1,6 +1,6 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
-import { csrf } from "hono/csrf";
+import { sameOrigin } from "../http";
 import { aiRoutes } from "./ai";
 import { appsRoutes } from "./apps";
 import { userRoutes } from "./users";
@@ -23,7 +23,7 @@ type Deps = {
 export function adminRoutes(deps: Deps) {
   const app = new Hono();
   // Form posts must come from our own origin; SameSite=Lax alone does not cover every case.
-  app.use(csrf({ origin: deps.publicOrigin }));
+  app.use(sameOrigin(deps.publicOrigin));
   app.route("/", authRoutes(deps));
 
   const pages = new Hono();
