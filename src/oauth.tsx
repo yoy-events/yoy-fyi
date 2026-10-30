@@ -426,7 +426,7 @@ export function oauthRoutes(deps: Deps) {
 
     const serviceId = one(form.service);
     const service = who.services.find((s) => s.id === serviceId);
-    const granted = [form.scope ?? []].flat().map(String);
+    const granted = [...new Set([form.scope ?? []].flat().map(String))];
     const scopesOk = granted.length > 0 && granted.every((s) => pending.scopes.includes(s));
     if (!service || !scopesOk) return errorPage(c, "Оберіть сервіс і хоча б один із запропонованих дозволів.");
 
