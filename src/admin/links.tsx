@@ -2,6 +2,7 @@ import type { SQL } from "bun";
 import { Hono } from "hono";
 import QRCode from "qrcode";
 import { type Bots, type Scope, breakdown, timeseries } from "../analytics";
+import { isUuid } from "../http";
 import { type LinkRow, createLink, toLink } from "../links";
 import { DIMENSIONS, type Dimension } from "../rollup";
 import type { UnsafeUrls } from "../safe-browsing";
@@ -158,7 +159,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls }: Deps)
 
   app.get("/links/:id", async (c) => {
     const id = c.req.param("id");
-    const [row] = /^[0-9a-f-]{36}$/i.test(id)
+    const [row] = isUuid(id)
       ? await sql`select l.*, s.slug from links l join services s on s.id = l.service_id where l.id = ${id}`
       : [];
     if (!row) return c.notFound();
@@ -243,7 +244,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls }: Deps)
 
   app.get("/links/:id/qr.svg", async (c) => {
     const id = c.req.param("id");
-    const [row] = /^[0-9a-f-]{36}$/i.test(id) ? await sql`select code from links where id = ${id}` : [];
+    const [row] = isUuid(id) ? await sql`select code from links where id = ${id}` : [];
     if (!row) return c.notFound();
     const svg = await QRCode.toString(`${publicOrigin}/${row.code}`, { type: "svg", margin: 2 });
     return c.body(svg, 200, { "Content-Type": "image/svg+xml" });
@@ -251,7 +252,7 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls }: Deps)
 
   app.post("/links/:id/disable", async (c) => {
     const id = c.req.param("id");
-    const [row] = /^[0-9a-f-]{36}$/i.test(id)
+    const [row] = isUuid(id)
       ? await sql`
           update links set disabled_at = coalesce(disabled_at, now()),
                            disabled_by = 'admin',

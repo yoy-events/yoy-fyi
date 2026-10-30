@@ -1,5 +1,6 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
+import { isUuid } from "../http";
 import { SCOPES, type Scope, issueKey, toApiKey } from "../keys";
 import { Errors, Layout, when } from "./layout";
 import { LinkForm, LinkList } from "./links";
@@ -106,7 +107,7 @@ export function serviceRoutes(sql: SQL) {
 
   app.post("/keys/:id/revoke", async (c) => {
     const id = c.req.param("id");
-    const [row] = /^[0-9a-f-]{36}$/i.test(id)
+    const [row] = isUuid(id)
       ? await sql`
           update api_keys k set revoked_at = coalesce(k.revoked_at, now())
           from services s where k.id = ${id} and s.id = k.service_id

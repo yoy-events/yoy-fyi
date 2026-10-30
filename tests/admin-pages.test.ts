@@ -187,6 +187,14 @@ describe("links", () => {
     expect((await adminGet(app, `/admin/links/${Bun.randomUUIDv7()}`, cookie)).status).toBe(404);
     expect((await adminGet(app, "/admin/links/nope", cookie)).status).toBe(404);
   });
+
+  // 36 characters of hex and dashes that are not a UUID used to reach Postgres and fail with 500.
+  test.each(["-".repeat(36), "a".repeat(36)])("a 36-character id that is not a UUID (%s) is 404", async (id) => {
+    expect((await adminGet(app, `/admin/links/${id}`, cookie)).status).toBe(404);
+    expect((await adminGet(app, `/admin/links/${id}/qr.svg`, cookie)).status).toBe(404);
+    expect((await adminPost(app, `/admin/links/${id}/disable`, {}, cookie)).status).toBe(404);
+    expect((await adminPost(app, `/admin/keys/${id}/revoke`, {}, cookie)).status).toBe(404);
+  });
 });
 
 describe("link analytics page", () => {
