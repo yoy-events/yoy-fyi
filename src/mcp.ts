@@ -35,7 +35,7 @@ type Tool = {
   annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: false };
   inputSchema: Json;
   outputSchema: Json;
-  run: (args: Json, api: Api, caller: Caller & { sql: SQL; publicOrigin: string }) => Promise<ToolResult>;
+  run: (args: Json, api: Api, caller: Caller & { sql: SQL; publicOrigin: string; now: () => Date }) => Promise<ToolResult>;
 };
 
 const toolError = (text: string): ToolResult => ({ isError: true, content: [{ type: "text", text }] });
@@ -132,8 +132,7 @@ const TOOLS: Tool[] = [
     // Answered from the caller itself: an OAuth grant has no API-key row for /v1/me to show.
     run: async (_, __, { sql, serviceId, scopes }) => {
       const [service] = await sql`select id, slug, name from services where id = ${serviceId}`;
-      const data = { service, scopes };
-      return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
+      return ok({ service, scopes });
     },
   },
   {
@@ -189,7 +188,7 @@ const TOOLS: Tool[] = [
       if (found.isError) return found;
       const link = (found.structuredContent as { data: Json[] }).data[0];
       if (!link) return toolError("not_found: no link of this service has that code.");
-      return { content: [{ type: "text", text: JSON.stringify(link) }], structuredContent: link };
+      return ok(link);
     },
   },
   {
@@ -426,14 +425,14 @@ const TOOLS: Tool[] = [
       properties: { handle: str, title: str, description: str, link_ids: { type: "array", items: str, maxItems: 30 } },
     },
     outputSchema: { type: "object", required: ["page"], properties: { page: { type: "object" } } },
-    run: async (args, _, { sql, serviceId, publicOrigin }) => {
+    run: async (args, _, { sql, serviceId, publicOrigin, now }) => {
       const userId = await ownerOf(sql, serviceId);
       if (!userId) return toolError("not_available: bio pages belong to personal yoy.fyi accounts, and this connection is for a service.");
       if (args.link_ids !== undefined && !Array.isArray(args.link_ids)) return toolError("validation_failed: link_ids must be a list of link ids.");
       const text = (v: unknown) => (typeof v === "string" ? v : "");
       const saved = await saveBio(
         sql,
-        { userId, serviceId, publicOrigin: publicOrigin, now: new Date() },
+        { userId, serviceId, publicOrigin, now: now() },
         { handle: text(args.handle), title: text(args.title), description: text(args.description), link: ((args.link_ids as unknown[]) ?? []).map(String) },
       );
       if ("errors" in saved) return toolError(`validation_failed: ${saved.errors.map((e) => bioErrorText(e, "en")).join(" ")}`);
@@ -478,7 +477,7 @@ export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120
         const details = e.details ? ` ${JSON.stringify(e.details)}` : "";
         return toolError(`${e.code ?? "internal"}: ${e.message ?? `HTTP ${res.status}`}${details}`);
       }
-      return { content: [{ type: "text", text: JSON.stringify(json) }], structuredContent: json };
+      return ok(json);
     };
 
   return async (c: Context) => {
@@ -546,7 +545,7 @@ export function mcpRoutes({ sql, publicOrigin, v1, now, limit = { perMinute: 120
           return ok(toolError(`forbidden: this key lacks the ${tool.scope} scope.`));
         }
         const started = performance.now();
-        const result = await tool.run(args as Json, apiFor(caller), { ...caller, sql, publicOrigin });
+        const result = await tool.run(args as Json, apiFor(caller), { ...caller, sql, publicOrigin, now });
         const ms = Math.round(performance.now() - started);
         // The link card also draws the QR code; it travels in _meta, which the model never sees.
         const shortUrl = result.structuredContent?.short_url;
