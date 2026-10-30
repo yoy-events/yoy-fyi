@@ -6,6 +6,7 @@ import {
   apiError,
   decodeCursor,
   encodeCursor,
+  isDateTime,
   isUuid,
   parseLimit,
   readJsonObject,
@@ -21,7 +22,6 @@ const RESERVED = new Set(["v1", "admin", "health", "qr", "static", "openapi", "r
 const CODE = /^[A-Za-z0-9_-]{1,64}$/;
 const TAG = /^[a-z0-9][a-z0-9_:.-]{0,39}$/;
 const UTM_KEYS = new Set(["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]);
-const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
 export type LinkRow = {
   id: string;
@@ -98,7 +98,7 @@ const FIELDS: Record<string, Check> = {
   },
   pass_click_id: { ok: (v) => typeof v === "boolean", rule: "boolean" },
   expires_at: {
-    ok: (v, now) => typeof v === "string" && RFC3339.test(v) && Date.parse(v) > now.getTime(),
+    ok: (v, now) => typeof v === "string" && isDateTime(v) && Date.parse(v) > now.getTime(),
     rule: "RFC 3339 date-time in the future",
     nullable: true,
   },
@@ -380,11 +380,14 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createL
       (q.tag !== undefined && !TAG.test(q.tag)) ||
       (q.code !== undefined && !CODE.test(q.code)) ||
       (q.q !== undefined && q.q.length > 200) ||
-      [q.created_after, q.created_before].some((t) => t !== undefined && !RFC3339.test(t));
+      [q.created_after, q.created_before].some((t) => t !== undefined && !isDateTime(t));
     if (bad) return apiError(c, 400, "invalid_request", "Invalid query parameter.");
     // `q` matches code, title or target as plain text; LIKE wildcards in it are escaped.
     const search = (q.q ?? "").trim();
     const pattern = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
+    // Passed as instants: Postgres refuses some dates that Date.parse rolls over, such as February 30.
+    const createdAfter = q.created_after ? new Date(q.created_after) : null;
+    const createdBefore = q.created_before ? new Date(q.created_before) : null;
 
     const rows: LinkRow[] = await sql`
       select * from links
@@ -395,8 +398,8 @@ export function linkRoutes({ sql, publicOrigin, resolveHost, unsafeUrls, createL
         and (${q.ext_service ?? null}::text is null or ext_service = ${q.ext_service ?? null})
         and (${q.ext_entity_type ?? null}::text is null or ext_entity_type = ${q.ext_entity_type ?? null})
         and (${q.ext_entity_id ?? null}::text is null or ext_entity_id = ${q.ext_entity_id ?? null})
-        and (${q.created_after ?? null}::timestamptz is null or created_at >= ${q.created_after ?? null}::timestamptz)
-        and (${q.created_before ?? null}::timestamptz is null or created_at < ${q.created_before ?? null}::timestamptz)
+        and (${createdAfter}::timestamptz is null or created_at >= ${createdAfter}::timestamptz)
+        and (${createdBefore}::timestamptz is null or created_at < ${createdBefore}::timestamptz)
         and (${cursor ?? null}::uuid is null or id < ${cursor ?? null}::uuid)
         and case ${status}
           when 'disabled' then disabled_at is not null

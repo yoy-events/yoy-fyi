@@ -34,6 +34,10 @@ export const validationFailed = (c: Context, fields: Record<string, string>) =>
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (s: string) => UUID.test(s);
 
+// An RFC 3339 date-time that is also a real instant: the shape alone lets month 13 or hour 25 through.
+const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+export const isDateTime = (s: string) => RFC3339.test(s) && !Number.isNaN(Date.parse(s));
+
 export async function readJsonObject(c: Context): Promise<Record<string, unknown> | null> {
   try {
     const body = await c.req.json();

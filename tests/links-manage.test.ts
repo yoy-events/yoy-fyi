@@ -84,6 +84,10 @@ describe("GET /v1/links", () => {
 
     expect(codes(await list("?created_after=2026-06-01T00:00:00Z"))).toEqual(["new"]);
     expect(codes(await list("?created_before=2026-06-01T00:00:00Z"))).toEqual(["old"]);
+    // An offset is honoured: 03:00+03:00 is midnight UTC.
+    expect(codes(await list("?created_after=2026-06-01T03:00:00%2B03:00"))).toEqual(["new"]);
+    // Date.parse rolls February 30 over to March 2; Postgres alone would refuse it with a 500.
+    expect(codes(await list("?created_before=2026-02-30T00:00:00Z"))).toEqual(["old"]);
   });
 
   test("filters by status", async () => {
@@ -99,7 +103,17 @@ describe("GET /v1/links", () => {
     expect(codes(await list())).toEqual(["off", "exp", "live"]);
   });
 
-  test.each(["?limit=0", "?limit=101", "?cursor=garbage", "?status=gone", "?created_after=yesterday", "?tag=UPPER"])(
+  test.each([
+    "?limit=0",
+    "?limit=101",
+    "?cursor=garbage",
+    "?status=gone",
+    "?created_after=yesterday",
+    "?tag=UPPER",
+    // RFC 3339 in shape but not a real date-time.
+    "?created_after=2026-13-01T00:00:00Z",
+    "?created_before=2026-01-01T25:00:00Z",
+  ])(
     "rejects %s with 400",
     async (query) => {
       const res = await call("GET", `/v1/links${query}`);

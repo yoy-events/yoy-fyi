@@ -4,9 +4,8 @@
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { type AuthEnv, requireScope } from "./auth";
-import { apiError, isUuid, readJsonObject, validationFailed } from "./http";
+import { apiError, isDateTime, isUuid, readJsonObject, validationFailed } from "./http";
 
-const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 const EVENT = /^[a-z0-9][a-z0-9_.:-]{0,63}$/;
 const FIELDS = new Set(["click_id", "event", "value", "currency", "external_id", "occurred_at"]);
 const DAY = 86_400_000;
@@ -49,7 +48,7 @@ export function validateConversion(body: Record<string, unknown>, now: Date): Re
   const ext = body.external_id;
   if (ext !== undefined && (typeof ext !== "string" || ext.length < 1 || ext.length > 128)) fields.external_id = "1-128 characters";
   const at = body.occurred_at;
-  if (at !== undefined && (typeof at !== "string" || !RFC3339.test(at) || Number.isNaN(Date.parse(at)) || Date.parse(at) > now.getTime() + 60_000)) {
+  if (at !== undefined && (typeof at !== "string" || !isDateTime(at) || Date.parse(at) > now.getTime() + 60_000)) {
     fields.occurred_at = "RFC 3339 date-time, not in the future";
   }
   return fields;
@@ -97,7 +96,7 @@ export function conversionRoutes({ sql, now }: { sql: SQL; now: () => Date }) {
     const q = c.req.query();
     const serviceId = c.get("caller").serviceId;
     const valid =
-      RFC3339.test(q.from ?? "") && RFC3339.test(q.to ?? "") && Date.parse(q.from!) < Date.parse(q.to!) && (q.link_id === undefined || isUuid(q.link_id));
+      isDateTime(q.from ?? "") && isDateTime(q.to ?? "") && Date.parse(q.from!) < Date.parse(q.to!) && (q.link_id === undefined || isUuid(q.link_id));
     if (!valid) return apiError(c, 400, "invalid_request", "Invalid or missing query parameter.");
     if (Date.parse(q.to!) - Date.parse(q.from!) > 400 * DAY) return apiError(c, 422, "range_too_large", "The requested range is too large.");
     if (q.link_id) {
